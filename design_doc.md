@@ -44,9 +44,9 @@ Rules:
 - The request body cannot exceed 1 MB.
 - Every response includes `X-Request-ID`; the service generates one when absent.
 
-### GET /healthz
+### GET /health
 
-Returns 200 OK when the Go service is running. Worker and GPU readiness may be reported separately through `GET /readyz`.
+Returns 200 OK when the Go service is running. Worker and GPU readiness may be reported separately through `GET /ready`.
 
 ## 4. Streaming protocol
 
