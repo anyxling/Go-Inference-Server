@@ -8,7 +8,7 @@ Build a small Go service that accepts text-inference requests and streams genera
 
 ```mermaid
 flowchart TD
-    C["Client / CLI"] -->|"HTTP POST"| G["Go inference service"]
+    C["Client"] -->|"HTTP POST"| G["Go inference service"]
     G -->|"Submit request"| W["Inference worker"]
     W -->|"Run model"| GPU["Single GPU"]
     GPU -->|"Generated tokens"| W
