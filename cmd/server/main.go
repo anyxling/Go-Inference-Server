@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 )
 
 const maxOutputTokensLimit = 1024 // move to config later
+const defaultMaxOutputTokens = 256
+const requestBodyLimit = 1 << 20
 
 type InferenceRequest struct {
 	Model           string  `json:"model"`
@@ -25,10 +28,16 @@ func main() {
 	healthHandler := func(w http.ResponseWriter, _ *http.Request) {}
 
 	inferenceHandler := func(w http.ResponseWriter, r *http.Request) {
-		inferenceReq := InferenceRequest{}
-		decoder := json.NewDecoder(r.Body)
+		var inferenceReq InferenceRequest
+		maxReader := http.MaxBytesReader(w, r.Body, requestBodyLimit)
+		decoder := json.NewDecoder(maxReader)
 		err := decoder.Decode(&inferenceReq)
 		if err != nil {
+			var maxByteErr *http.MaxBytesError
+			if errors.As(err, &maxByteErr) {
+				http.Error(w, fmt.Sprintf("Request cannot exceed %d bytes", requestBodyLimit), http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
@@ -45,7 +54,7 @@ func main() {
 			return
 		}
 		if inferenceReq.MaxOutputTokens == 0 {
-			inferenceReq.MaxOutputTokens = 256
+			inferenceReq.MaxOutputTokens = defaultMaxOutputTokens
 		}
 		if inferenceReq.MaxOutputTokens > maxOutputTokensLimit || inferenceReq.MaxOutputTokens < 1 {
 			http.Error(w, fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit), http.StatusBadRequest)
