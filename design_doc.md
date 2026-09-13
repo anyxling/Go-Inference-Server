@@ -36,11 +36,11 @@ Request body:
 
 Rules:
 
-- `model` and `prompt` are required.
-- `prompt` cannot be empty.
-- `max_output_tokens` must be between 1 and the configured limit.
+- `model` and `prompt` are required and cannot be empty.
+- `max_output_tokens` is optional and defaults to 256 when omitted. When present it must be between 1 and the configured limit.
 - Input tokens plus `max_output_tokens` must not exceed the model context window.
-- `temperature` must be between 0 and 2.
+- `temperature` is optional and defaults to 0. When present it must be between 0 and 2.
+- `stream` is optional and defaults to `false`. A client must send `"stream": true` to receive Server-Sent Events.
 - The request body cannot exceed 1 MB.
 - Every response includes `X-Request-ID`; the service generates one when absent.
 
