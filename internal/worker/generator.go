@@ -21,7 +21,11 @@ func (f *Fake) Generate(ctx context.Context, req Request) (<-chan Token, error) 
 	go func() {
 		defer close(ch)
 		for _, token := range f.Tokens {
-			time.Sleep(f.Delay)
+			select {
+			case <-time.After(f.Delay):
+			case <-ctx.Done():
+				return
+			}
 			select {
 			case ch <- Token{Text: token}:
 			case <-ctx.Done():
