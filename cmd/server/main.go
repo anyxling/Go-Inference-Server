@@ -21,6 +21,24 @@ type InferenceRequest struct {
 	Stream          bool    `json:"stream"`
 }
 
+type errorResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func writeError(w http.ResponseWriter, status int, code string, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	response := errorResponse{
+		Code:    code,
+		Message: msg,
+	}
+	err := json.NewEncoder(w).Encode(response)
+	if err != nil {
+		log.Printf("Write error response: %v", err)
+	}
+}
+
 func main() {
 
 	mux := http.NewServeMux()
@@ -35,29 +53,29 @@ func main() {
 		if err != nil {
 			var maxByteErr *http.MaxBytesError
 			if errors.As(err, &maxByteErr) {
-				http.Error(w, fmt.Sprintf("Request cannot exceed %d bytes", requestBodyLimit), http.StatusRequestEntityTooLarge)
+				writeError(w, 413, "request_too_large", fmt.Sprintf("Request cannot exceed %d bytes", requestBodyLimit))
 				return
 			}
-			http.Error(w, "Bad Request", http.StatusBadRequest)
+			writeError(w, 400, "invalid_request", "Bad request")
 			return
 		}
 		if inferenceReq.Model == "" {
-			http.Error(w, "model cannot be empty", http.StatusBadRequest)
+			writeError(w, 400, "invalid_request", "model cannot be empty")
 			return
 		}
 		if inferenceReq.Prompt == "" {
-			http.Error(w, "prompt cannot be empty", http.StatusBadRequest)
+			writeError(w, 400, "invalid_request", "prompt cannot be empty")
 			return
 		}
 		if inferenceReq.Temperature > 2 || inferenceReq.Temperature < 0 {
-			http.Error(w, "temperature must be between 0 and 2", http.StatusBadRequest)
+			writeError(w, 400, "invalid_request", "temperature must be between 0 and 2")
 			return
 		}
 		if inferenceReq.MaxOutputTokens == 0 {
 			inferenceReq.MaxOutputTokens = defaultMaxOutputTokens
 		}
 		if inferenceReq.MaxOutputTokens > maxOutputTokensLimit || inferenceReq.MaxOutputTokens < 1 {
-			http.Error(w, fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit), http.StatusBadRequest)
+			writeError(w, 400, "invalid_request", fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit))
 			return
 		}
 	}
