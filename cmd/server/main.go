@@ -1,19 +1,19 @@
 package main
 
 import (
-	"github.com/monikaliu/go-inference-server/internal/api"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/monikaliu/go-inference-server/internal/api"
 )
 
 func main() {
-
 	mux := http.NewServeMux()
 
 	server := http.Server{
 		Addr:              ":8080",
-		Handler:           mux,
+		Handler:           api.RequestID(mux),
 		ReadTimeout:       5 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
