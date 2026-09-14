@@ -38,9 +38,9 @@ func writeError(w http.ResponseWriter, status int, code string, msg string) {
 	}
 }
 
-func HealthHandler(w http.ResponseWriter, _ *http.Request) {}
+func (s *Server) HealthHandler(w http.ResponseWriter, _ *http.Request) {}
 
-func InferenceHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 	var inferenceReq inferenceRequest
 	maxReader := http.MaxBytesReader(w, r.Body, requestBodyLimit)
 	decoder := json.NewDecoder(maxReader)

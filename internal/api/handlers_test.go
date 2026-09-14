@@ -8,10 +8,11 @@ import (
 )
 
 func TestHealthHandler(t *testing.T) {
+	server := NewServer(&worker.Fake{})
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
-	HealthHandler(rec, req)
+	server.HealthHandler(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
@@ -19,6 +20,7 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestInferenceHandler(t *testing.T) {
+	server := NewServer(&worker.Fake{})
 	prompt := strings.Repeat("a", 1<<20)
 	tests := []struct {
 		name       string
@@ -35,14 +37,14 @@ func TestInferenceHandler(t *testing.T) {
 		{name: "tokens too high", body: `{"model":"llm","prompt":"hi","temperature":2,"max_output_tokens":5000}`, wantStatus: http.StatusBadRequest},
 		{name: "tokens negative", body: `{"model":"llm","prompt":"hi","temperature":2,"max_output_tokens":-5}`, wantStatus: http.StatusBadRequest},
 		{name: "tokens omitted", body: `{"model":"llm","prompt":"hi","temperature":2}`, wantStatus: http.StatusOK},
-		{name: "body over 1 MB", body: `{"model":"llm","prompt":"`+prompt+`","temperature":2}`, wantStatus: http.StatusRequestEntityTooLarge},
+		{name: "body over 1 MB", body: `{"model":"llm","prompt":"` + prompt + `","temperature":2}`, wantStatus: http.StatusRequestEntityTooLarge},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(tc.body))
 			rec := httptest.NewRecorder()
 
-			InferenceHandler(rec, req)
+			server.InferenceHandler(rec, req)
 
 			if rec.Code != tc.wantStatus {
 				t.Errorf("got status %d, want %d", rec.Code, tc.wantStatus)
