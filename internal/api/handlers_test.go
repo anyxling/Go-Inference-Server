@@ -102,3 +102,29 @@ func TestInferenceHandlerInternalError(t *testing.T) {
 		t.Errorf("got %q, want %q", got.Code, "internal_error")
 	}
 }
+
+
+func TestInferenceHandlerSuccess(t *testing.T){
+	server := NewServer(&worker.Fake{
+		Tokens:    []string{"a", "b", "c"},
+		Delay: 0,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+
+	server.InferenceHandler(rec, req)
+
+	var got inferenceResponse
+	err := json.NewDecoder(rec.Body).Decode(&got)
+	if err != nil {
+		t.Fatalf("Should not get error but got %v", err)
+	}
+
+	if got.Text != "abc" {
+		t.Errorf("got %q, want %q", got.Text, "abc")
+	}
+
+	if got.GeneratedTokens != 3 {
+		t.Errorf("got %d, want %d", got.GeneratedTokens, 3)
+	}
+}
