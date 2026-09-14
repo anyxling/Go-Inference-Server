@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/monikaliu/go-inference-server/internal/worker"
 )
 
 func TestHealthHandler(t *testing.T) {
@@ -50,5 +53,52 @@ func TestInferenceHandler(t *testing.T) {
 				t.Errorf("got status %d, want %d", rec.Code, tc.wantStatus)
 			}
 		})
+	}
+}
+
+func TestInferenceHandlerWorkerUnavailable(t *testing.T) {
+	server := NewServer(&worker.Fake{Err: worker.ErrFakeFailure})
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+
+	server.InferenceHandler(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("got %v, want %v", rec.Code, http.StatusServiceUnavailable)
+	}
+
+	var got errorResponse
+	err := json.NewDecoder(rec.Body).Decode(&got)
+	if err != nil {
+		t.Fatalf("Should not get error but got %v", err)
+	}
+
+	if got.Code != "worker_unavailable" {
+		t.Errorf("got %q, want %q", got.Code, "worker_unavailable")
+	}
+}
+
+func TestInferenceHandlerInternalError(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens:    []string{"a", "b", "c"},
+		FailAfter: 1,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+
+	server.InferenceHandler(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("got %v, want %v", rec.Code, http.StatusInternalServerError)
+	}
+
+	var got errorResponse
+	err := json.NewDecoder(rec.Body).Decode(&got)
+	if err != nil {
+		t.Fatalf("Should not get error but got %v", err)
+	}
+
+	if got.Code != "internal_error" {
+		t.Errorf("got %q, want %q", got.Code, "internal_error")
 	}
 }

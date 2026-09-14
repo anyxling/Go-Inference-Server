@@ -38,7 +38,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	err := json.NewEncoder(w).Encode(v)
 	if err != nil {
-		log.Printf("write JSON response", err)
+		log.Printf("Write JSON response: %v", err)
 	}
 }
 
