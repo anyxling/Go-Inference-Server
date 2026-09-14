@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+
+	"github.com/monikaliu/go-inference-server/internal/worker"
 )
 
 const maxOutputTokensLimit = 1024 // move to config later
@@ -72,5 +75,26 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 	if inferenceReq.MaxOutputTokens > maxOutputTokensLimit || inferenceReq.MaxOutputTokens < 1 {
 		writeError(w, 400, "invalid_request", fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit))
 		return
+	}
+	req := worker.Request{
+		Model:           inferenceReq.Model,
+		Prompt:          inferenceReq.Prompt,
+		MaxOutputTokens: inferenceReq.MaxOutputTokens,
+		Temperature:     inferenceReq.Temperature,
+	}
+	ch, err := s.generator.Generate(r.Context(), req)
+	if err != nil {
+		writeError(w, 503, "worker_unavailable", "Inference worker is unavailable")
+		return
+	}
+	var sb strings.Builder
+	var count int
+	for token := range ch {
+		if token.Err != nil {
+			writeError(w, 500, "internal_error", "Token not generated successfully")
+			return
+		}
+		sb.WriteString(token.Text)
+		count++
 	}
 }
