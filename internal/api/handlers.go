@@ -28,17 +28,26 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-func writeError(w http.ResponseWriter, status int, code string, msg string) {
+type inferenceResponse struct {
+	Text            string `json:"text"`
+	GeneratedTokens int    `json:"generated_tokens"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	err := json.NewEncoder(w).Encode(v)
+	if err != nil {
+		log.Printf("write JSON response", err)
+	}
+}
+
+func writeError(w http.ResponseWriter, status int, code string, msg string) {
 	response := errorResponse{
 		Code:    code,
 		Message: msg,
 	}
-	err := json.NewEncoder(w).Encode(response)
-	if err != nil {
-		log.Printf("Write error response: %v", err)
-	}
+	writeJSON(w, status, response)
 }
 
 func (s *Server) HealthHandler(w http.ResponseWriter, _ *http.Request) {}
@@ -84,6 +93,7 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ch, err := s.generator.Generate(r.Context(), req)
 	if err != nil {
+		log.Printf("generate: %v", err)
 		writeError(w, 503, "worker_unavailable", "Inference worker is unavailable")
 		return
 	}
@@ -97,4 +107,9 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString(token.Text)
 		count++
 	}
+	res := inferenceResponse{
+		Text:            sb.String(),
+		GeneratedTokens: count,
+	}
+	writeJSON(w, http.StatusOK, res)
 }
