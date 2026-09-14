@@ -103,11 +103,10 @@ func TestInferenceHandlerInternalError(t *testing.T) {
 	}
 }
 
-
-func TestInferenceHandlerSuccess(t *testing.T){
+func TestInferenceHandlerSuccess(t *testing.T) {
 	server := NewServer(&worker.Fake{
-		Tokens:    []string{"a", "b", "c"},
-		Delay: 0,
+		Tokens: []string{"a", "b", "c"},
+		Delay:  0,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
