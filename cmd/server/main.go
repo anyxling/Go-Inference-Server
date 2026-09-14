@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/monikaliu/go-inference-server/internal/api"
+	"github.com/monikaliu/go-inference-server/internal/worker"
 )
 
 func main() {
@@ -18,7 +19,12 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	mux.HandleFunc("GET /health", api.HealthHandler)
-	mux.HandleFunc("POST /v1/inference", api.InferenceHandler)
+	app := api.NewServer(&worker.Fake{
+			Tokens: []string{"a", "b", "c"},
+			Delay:  100 * time.Millisecond,
+	})
+
+	mux.HandleFunc("GET /health", app.HealthHandler)
+	mux.HandleFunc("POST /v1/inference", app.InferenceHandler)
 	log.Fatal(server.ListenAndServe())
 }
