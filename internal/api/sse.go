@@ -2,8 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"fmt"
+	"io"
 )
 
 func writeSSE(w io.Writer, event string, data any) error {
@@ -11,7 +11,7 @@ func writeSSE(w io.Writer, event string, data any) error {
 	if err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf("event: %s\ndata: %s\n\n", event, b)
+	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 	if err != nil {
 		return err
 	}

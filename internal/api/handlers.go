@@ -97,10 +97,19 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "worker_unavailable", "Inference worker is unavailable")
 		return
 	}
+	if inferenceReq.Stream {
+		s.streamTokens(w, ch)
+		return 
+	}
+	s.writeCollected(w, ch)
+}
+
+func (s *Server) writeCollected(w http.ResponseWriter, ch <-chan worker.Token) {
 	var sb strings.Builder
 	var count int
 	for token := range ch {
 		if token.Err != nil {
+			log.Printf("generate token: %v", token.Err)
 			writeError(w, 500, "internal_error", "Token not generated successfully")
 			return
 		}
@@ -113,3 +122,5 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, res)
 }
+
+func (s *Server) streamTokens(w http.ResponseWriter, ch <-chan worker.Token) {}
