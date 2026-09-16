@@ -33,6 +33,15 @@ type inferenceResponse struct {
 	GeneratedTokens int    `json:"generated_tokens"`
 }
 
+type tokenEvent struct {
+	Text string
+}
+
+type doneEvent struct {
+	FinishReason    string
+	GeneratedTokens int
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -99,7 +108,7 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if inferenceReq.Stream {
 		s.streamTokens(w, ch)
-		return 
+		return
 	}
 	s.writeCollected(w, ch)
 }
@@ -123,4 +132,39 @@ func (s *Server) writeCollected(w http.ResponseWriter, ch <-chan worker.Token) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-func (s *Server) streamTokens(w http.ResponseWriter, ch <-chan worker.Token) {}
+func (s *Server) streamTokens(w http.ResponseWriter, ch <-chan worker.Token) {
+	var count int
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, 500, "internal_error", "streaming not supported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	for token := range ch {
+		if token.Err != nil {
+			log.Printf("generate token: %v", token.Err)
+			err := writeSSE(w, "error", errorResponse{"internal_error", "Token not generated successfully"})
+			if err != nil {
+				log.Printf("Error write fail: %v", err)
+			}
+			flusher.Flush()
+			return
+		}
+		err := writeSSE(w, "token", tokenEvent{Text: token.Text})
+		if err != nil {
+			log.Printf("Token write fail: %v", err)
+			return
+		}
+		flusher.Flush()
+		count++
+	}
+	err := writeSSE(w, "done", doneEvent{FinishReason: "stop", GeneratedTokens: count})
+	if err != nil {
+		log.Printf("Done write fail: %v", err)
+		return
+	}
+	flusher.Flush()
+}
