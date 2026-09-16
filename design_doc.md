@@ -70,7 +70,18 @@ event: done
 data: {"finish_reason":"stop","generated_tokens":42}
 ```
 
-The service flushes every event immediately and preserves token order. If `stream` is `false`, it returns one JSON response after inference finishes.
+The service flushes every event immediately and preserves token order. If `stream` is `false`, it returns one JSON response after inference finishes:
+
+```json
+{"text":"A graph database","generated_tokens":42}
+```
+
+If generation fails after the stream has started, the service sends an `error` event with the same body shape as the JSON errors in section 5, then closes the connection. No `done` event follows an `error` event.
+
+```
+event: error
+data: {"code":"internal_error","message":"Token not generated successfully"}
+```
 
 ## 5. Errors
 
@@ -86,7 +97,7 @@ Before streaming starts, errors use JSON and an HTTP status code:
 | 504 | `inference_timeout` | Inference exceeded its deadline |
 | 500 | `internal_error` | Unexpected server failure |
 
-After streaming starts, the service sends an SSE error event and closes the connection because the HTTP status can no longer be changed.
+After streaming starts, the HTTP status can no longer be changed, so the service sends the `error` event described in section 4 and closes the connection. The `code` values are the same as in the table above.
 
 ## 6. Timeouts and cancellation
 
