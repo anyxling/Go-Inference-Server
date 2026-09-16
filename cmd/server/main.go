@@ -20,8 +20,8 @@ func main() {
 	}
 
 	app := api.NewServer(&worker.Fake{
-			Tokens: []string{"a", "b", "c"},
-			Delay:  100 * time.Millisecond,
+		Tokens: []string{"a", "b", "c"},
+		Delay:  100 * time.Millisecond,
 	})
 
 	mux.HandleFunc("GET /health", app.HealthHandler)

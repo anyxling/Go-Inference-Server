@@ -34,12 +34,12 @@ type inferenceResponse struct {
 }
 
 type tokenEvent struct {
-	Text string
+	Text string `json:"text"`
 }
 
 type doneEvent struct {
-	FinishReason    string
-	GeneratedTokens int
+	FinishReason    string `json:"finish_reason"`
+	GeneratedTokens int    `json:"generated_tokens"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -146,7 +146,7 @@ func (s *Server) streamTokens(w http.ResponseWriter, ch <-chan worker.Token) {
 	for token := range ch {
 		if token.Err != nil {
 			log.Printf("generate token: %v", token.Err)
-			err := writeSSE(w, "error", errorResponse{"internal_error", "Token not generated successfully"})
+			err := writeSSE(w, "error", errorResponse{Code: "internal_error", Message: "Token not generated successfully"})
 			if err != nil {
 				log.Printf("Error write fail: %v", err)
 			}

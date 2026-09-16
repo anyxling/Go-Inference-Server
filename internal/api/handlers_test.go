@@ -116,7 +116,7 @@ func TestInferenceHandlerSuccess(t *testing.T) {
 	var got inferenceResponse
 	err := json.NewDecoder(rec.Body).Decode(&got)
 	if err != nil {
-		t.Fatalf("Should not get error but got %v", err)
+		t.Fatalf("Got decode error %v", err)
 	}
 
 	if got.Text != "abc" {
@@ -125,5 +125,66 @@ func TestInferenceHandlerSuccess(t *testing.T) {
 
 	if got.GeneratedTokens != 3 {
 		t.Errorf("got %d, want %d", got.GeneratedTokens, 3)
+	}
+}
+
+func TestInferenceHandlerStream(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("got content-type %s, want %s", rec.Header().Get("Content-Type"), "text/event-stream")
+	}
+
+	if strings.Count(body, "event: token") != 3 {
+		t.Errorf("got %d token, want %d", strings.Count(body, "event: token"), 3)
+	}
+
+	if !strings.Contains(body, `data: {"text":"a"}`) {
+		t.Errorf("got tokens %s, want %s", body, `data: {"text":"a"}`)
+	}
+
+	if !strings.Contains(body, "event: done") {
+		t.Errorf("stream did not finish successfully, got %s, want %s", body, "event: done")
+	}
+
+	if !strings.Contains(body, `"generated_tokens":3`) {
+		t.Errorf("stream finished without all tokens, got %s, want %s", body, `"generated_tokens":3`)
+	}
+}
+
+func TestInferenceHandlerStreamError(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens:    []string{"a", "b", "c"},
+		FailAfter: 1,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	body := rec.Body.String()
+
+	if strings.Count(body, "event: token") != 1 {
+		t.Errorf("got %d token, want %d", strings.Count(body, "event: token"), 1)
+	}
+
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("stream should have error, got %s, want %s", body, "event: error")
+	}
+
+	if !strings.Contains(body, `"code":"internal_error"`) {
+		t.Errorf("wrong error content, got %s, want %s", body, `"code":"internal_error"`)
+	}
+
+	if strings.Contains(body, "event: done") {
+		t.Errorf("stream should not have finished, body: %q", body)
 	}
 }
