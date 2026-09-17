@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,26 +95,28 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit))
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), s.timeouts.Total)
+	defer cancel()
 	req := worker.Request{
 		Model:           inferenceReq.Model,
 		Prompt:          inferenceReq.Prompt,
 		MaxOutputTokens: inferenceReq.MaxOutputTokens,
 		Temperature:     inferenceReq.Temperature,
 	}
-	ch, err := s.generator.Generate(r.Context(), req)
+	ch, err := s.generator.Generate(ctx, req)
 	if err != nil {
 		log.Printf("generate: %v", err)
 		writeError(w, 503, "worker_unavailable", "Inference worker is unavailable")
 		return
 	}
 	if inferenceReq.Stream {
-		s.streamTokens(w, ch)
+		s.streamTokens(ctx, w, ch)
 		return
 	}
-	s.writeCollected(w, ch)
+	s.writeCollected(ctx, w, ch)
 }
 
-func (s *Server) writeCollected(w http.ResponseWriter, ch <-chan worker.Token) {
+func (s *Server) writeCollected(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var sb strings.Builder
 	var count int
 	for token := range ch {
@@ -132,7 +135,7 @@ func (s *Server) writeCollected(w http.ResponseWriter, ch <-chan worker.Token) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-func (s *Server) streamTokens(w http.ResponseWriter, ch <-chan worker.Token) {
+func (s *Server) streamTokens(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var count int
 	flusher, ok := w.(http.Flusher)
 	if !ok {
