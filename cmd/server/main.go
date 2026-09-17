@@ -22,7 +22,7 @@ func main() {
 	app := api.NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
 		Delay:  100 * time.Millisecond,
-	})
+	}, api.DefaultTimeouts())
 
 	mux.HandleFunc("GET /health", app.HealthHandler)
 	mux.HandleFunc("POST /v1/inference", app.InferenceHandler)
