@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/monikaliu/go-inference-server/internal/worker"
 )
@@ -119,14 +120,28 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeCollected(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var sb strings.Builder
 	var count int
-	for token := range ch {
-		if token.Err != nil {
-			log.Printf("generate token: %v", token.Err)
-			writeError(w, 500, "internal_error", "Token not generated successfully")
+	timer := time.NewTimer(s.timeouts.FirstToken)
+	defer timer.Stop()
+loop:
+	for {
+		select {
+		case token, ok := <-ch:
+			if !ok {
+				break loop
+			}
+			if token.Err != nil {
+				log.Printf("generate token: %v", token.Err)
+				writeError(w, 500, "internal_error", "Token not generated successfully")
+				return
+			}
+			sb.WriteString(token.Text)
+			count++
+		case <-timer.C:
+			log.Printf("inference timeout, cannot be more than %v", s.timeouts.Idle)
+			writeError(w, http.StatusGatewayTimeout, "inference_timeout", "inference time out")
 			return
 		}
-		sb.WriteString(token.Text)
-		count++
+		timer.Reset(s.timeouts.Idle)
 	}
 	err := ctx.Err()
 	switch {
@@ -147,6 +162,7 @@ func (s *Server) writeCollected(ctx context.Context, w http.ResponseWriter, ch <
 
 func (s *Server) streamTokens(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var count int
+	timer := time.NewTimer(s.timeouts.FirstToken)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, 500, "internal_error", "streaming not supported")
@@ -156,23 +172,39 @@ func (s *Server) streamTokens(ctx context.Context, w http.ResponseWriter, ch <-c
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-	for token := range ch {
-		if token.Err != nil {
-			log.Printf("generate token: %v", token.Err)
-			err := writeSSE(w, "error", errorResponse{Code: "internal_error", Message: "Token not generated successfully"})
+loop:
+	for {
+		select {
+		case token, ok := <-ch:
+			if !ok {
+				break loop
+			}
+			if token.Err != nil {
+				log.Printf("generate token: %v", token.Err)
+				err := writeSSE(w, "error", errorResponse{Code: "internal_error", Message: "Token not generated successfully"})
+				if err != nil {
+					log.Printf("Error write fail: %v", err)
+				}
+				flusher.Flush()
+				return
+			}
+			err := writeSSE(w, "token", tokenEvent{Text: token.Text})
+			if err != nil {
+				log.Printf("Token write fail: %v", err)
+				return
+			}
+			flusher.Flush()
+			count++
+		case <-timer.C:
+			log.Printf("inference timeout, cannot be more than %v", s.timeouts.Idle)
+			err := writeSSE(w, "error", errorResponse{Code: "inference_timeout", Message: "inference timeout"})
 			if err != nil {
 				log.Printf("Error write fail: %v", err)
 			}
 			flusher.Flush()
 			return
 		}
-		err := writeSSE(w, "token", tokenEvent{Text: token.Text})
-		if err != nil {
-			log.Printf("Token write fail: %v", err)
-			return
-		}
-		flusher.Flush()
-		count++
+		timer.Reset(s.timeouts.Idle)
 	}
 	err := ctx.Err()
 	switch {
