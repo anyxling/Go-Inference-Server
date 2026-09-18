@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,8 @@ import (
 	"github.com/monikaliu/go-inference-server/internal/worker"
 )
 
-func shortTimeouts() {
-	return Timeouts{Total: 50 * time.Millisecond, FirstToken: time.Second, Idle: time.Second}
+func shortTimeouts(t time.Duration, f time.Duration, i time.Duration) Timeouts {
+	return Timeouts{Total: t, FirstToken: f, Idle: i}
 }
 
 func TestHealthHandler(t *testing.T) {
@@ -171,7 +172,7 @@ func TestInferenceHandlerStreamError(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens:    []string{"a", "b", "c"},
 		FailAfter: 1,
-	}, shortTimeouts())
+	}, shortTimeouts(50*time.Millisecond, time.Second, time.Second))
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
 	server.InferenceHandler(rec, req)
@@ -198,7 +199,7 @@ func TestInferenceHandlerTotalTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
 		Delay:  20 * time.Millisecond,
-	}, shortTimeouts())
+	}, shortTimeouts(50*time.Millisecond, time.Second, time.Second))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
@@ -222,7 +223,7 @@ func TestInferenceHandlerStreamTotalTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
 		Delay:  20 * time.Millisecond,
-	}, shortTimeouts())
+	}, shortTimeouts(50*time.Millisecond, time.Second, time.Second))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
@@ -243,5 +244,154 @@ func TestInferenceHandlerStreamTotalTimeout(t *testing.T) {
 
 	if strings.Contains(body, "event: done") {
 		t.Errorf("stream should not have finished, body: %q", body)
+	}
+}
+
+func TestInferenceHandlerFirstTokenTimeout(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+		Delay:  200 * time.Millisecond,
+	}, shortTimeouts(time.Second, 50*time.Millisecond, time.Second))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Errorf("got %v, want %v", rec.Code, http.StatusGatewayTimeout)
+	}
+
+	var got errorResponse
+	err := json.NewDecoder(rec.Body).Decode(&got)
+	if err != nil {
+		t.Fatalf("decode error %v", err)
+	}
+
+	if got.Code != "inference_timeout" {
+		t.Errorf("got %q, want %q", got.Code, "inference_timeout")
+	}
+}
+
+func TestInferenceHandlerIdleTimeout(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c"},
+		Delay:  100 * time.Millisecond,
+	}, shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Errorf("got %v, want %v", rec.Code, http.StatusGatewayTimeout)
+	}
+
+	var got errorResponse
+	err := json.NewDecoder(rec.Body).Decode(&got)
+	if err != nil {
+		t.Fatalf("decode error %v", err)
+	}
+
+	if got.Code != "inference_timeout" {
+		t.Errorf("got %q, want %q", got.Code, "inference_timeout")
+	}
+}
+
+func TestInferenceHandlerStreamFirstTokenTimeout(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+		Delay:  200 * time.Millisecond,
+	}, shortTimeouts(time.Second, 50*time.Millisecond, time.Second))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("stream should have error, got %s, want %s", body, "event: error")
+	}
+
+	if !strings.Contains(body, `"code":"inference_timeout"`) {
+		t.Errorf("wrong error content, got %s, want %s", body, `"code":"inference_timeout"`)
+	}
+
+	if strings.Contains(body, "event: done") {
+		t.Errorf("stream should not have finished, body: %q", body)
+	}
+}
+
+func TestInferenceHandlerStreamIdleTimeout(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c"},
+		Delay:  100 * time.Millisecond,
+	}, shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("stream should have error, got %s, want %s", body, "event: error")
+	}
+
+	if !strings.Contains(body, `"code":"inference_timeout"`) {
+		t.Errorf("wrong error content, got %s, want %s", body, `"code":"inference_timeout"`)
+	}
+
+	if strings.Contains(body, "event: done") {
+		t.Errorf("stream should not have finished, body: %q", body)
+	}
+
+	if strings.Count(body, "event: token") != 1 {
+		t.Errorf("got %d token, want %d", strings.Count(body, "event: token"), 1)
+	}
+}
+
+func TestInferenceHandlerClientDisconnect(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+		Delay:  50 * time.Millisecond,
+	}, DefaultTimeouts())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.InferenceHandler(rec, req)
+		close(done)
+	}()
+
+	time.Sleep(120 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not return after cancel")
+	}
+
+	body := rec.Body.String()
+
+	if strings.Count(body, "event: token") < 1 {
+		t.Errorf("got %d token, but it should be at least %d", strings.Count(body, "event: token"), 1)
+	}
+
+	if strings.Contains(body, "event: done") {
+		t.Errorf("stream should not have finished, body: %q", body)
+	}
+
+	if strings.Contains(body, "event: error") {
+		t.Errorf("stream should be canceled without error, got %s, want %s", body, "event: error")
 	}
 }
