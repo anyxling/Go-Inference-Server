@@ -128,6 +128,16 @@ func (s *Server) writeCollected(ctx context.Context, w http.ResponseWriter, ch <
 		sb.WriteString(token.Text)
 		count++
 	}
+	err := ctx.Err()
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		log.Printf("inference time out: %v", err)
+		writeError(w, http.StatusGatewayTimeout, "inference_timeout", "inference timeout")
+		return
+	case errors.Is(err, context.Canceled):
+		log.Printf("client got canceled: %v", err)
+		return
+	}
 	res := inferenceResponse{
 		Text:            sb.String(),
 		GeneratedTokens: count,
@@ -164,8 +174,20 @@ func (s *Server) streamTokens(ctx context.Context, w http.ResponseWriter, ch <-c
 		flusher.Flush()
 		count++
 	}
-	err := writeSSE(w, "done", doneEvent{FinishReason: "stop", GeneratedTokens: count})
-	if err != nil {
+	err := ctx.Err()
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		log.Printf("inference time out: %v", err)
+		if err := writeSSE(w, "error", errorResponse{Code: "inference_timeout", Message: "Inference timeout"}); err != nil {
+			log.Printf("Error write fail: %v", err)
+		}
+		flusher.Flush()
+		return
+	case errors.Is(err, context.Canceled):
+		log.Printf("client got canceled: %v", err)
+		return
+	}
+	if err := writeSSE(w, "done", doneEvent{FinishReason: "stop", GeneratedTokens: count}); err != nil {
 		log.Printf("Done write fail: %v", err)
 		return
 	}
