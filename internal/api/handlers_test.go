@@ -6,9 +6,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/monikaliu/go-inference-server/internal/worker"
 )
+
+func shortTimeouts() {
+	return Timeouts{Total: 50 * time.Millisecond, FirstToken: time.Second, Idle: time.Second}
+}
 
 func TestHealthHandler(t *testing.T) {
 	server := NewServer(&worker.Fake{}, DefaultTimeouts())
@@ -166,7 +171,7 @@ func TestInferenceHandlerStreamError(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens:    []string{"a", "b", "c"},
 		FailAfter: 1,
-	}, DefaultTimeouts())
+	}, shortTimeouts())
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
 	server.InferenceHandler(rec, req)
@@ -182,6 +187,58 @@ func TestInferenceHandlerStreamError(t *testing.T) {
 
 	if !strings.Contains(body, `"code":"internal_error"`) {
 		t.Errorf("wrong error content, got %s, want %s", body, `"code":"internal_error"`)
+	}
+
+	if strings.Contains(body, "event: done") {
+		t.Errorf("stream should not have finished, body: %q", body)
+	}
+}
+
+func TestInferenceHandlerTotalTimeout(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+		Delay:  20 * time.Millisecond,
+	}, shortTimeouts())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Errorf("got %v, want %v", rec.Code, http.StatusGatewayTimeout)
+	}
+
+	var got errorResponse
+	err := json.NewDecoder(rec.Body).Decode(&got)
+	if err != nil {
+		t.Fatalf("decode error %v", err)
+	}
+
+	if got.Code != "inference_timeout" {
+		t.Errorf("got %q, want %q", got.Code, "inference_timeout")
+	}
+}
+
+func TestInferenceHandlerStreamTotalTimeout(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+		Delay:  20 * time.Millisecond,
+	}, shortTimeouts())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("stream should have error, got %s, want %s", body, "event: error")
+	}
+
+	if !strings.Contains(body, `"code":"inference_timeout"`) {
+		t.Errorf("wrong error content, got %s, want %s", body, `"code":"inference_timeout"`)
 	}
 
 	if strings.Contains(body, "event: done") {
