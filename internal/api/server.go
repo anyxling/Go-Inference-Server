@@ -8,11 +8,16 @@ import (
 
 type Server struct {
 	generator worker.Generator
-	timeouts  Timeouts
+	config    Config
 }
 
-func NewServer(g worker.Generator, t Timeouts) *Server {
-	return &Server{generator: g, timeouts: t}
+func NewServer(g worker.Generator, c Config) *Server {
+	return &Server{generator: g, config: c}
+}
+
+type Config struct {
+	Timeouts  Timeouts
+	MaxActive int
 }
 
 type Timeouts struct {
@@ -26,5 +31,12 @@ func DefaultTimeouts() Timeouts {
 		Total:      120 * time.Second,
 		FirstToken: 30 * time.Second,
 		Idle:       15 * time.Second,
+	}
+}
+
+func DefaultConfig() Config {
+	return Config{
+		Timeouts:  DefaultTimeouts(),
+		MaxActive: 2,
 	}
 }

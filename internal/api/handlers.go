@@ -96,7 +96,7 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit))
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.timeouts.Total)
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeouts.Total)
 	defer cancel()
 	req := worker.Request{
 		Model:           inferenceReq.Model,
@@ -120,7 +120,7 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeCollected(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var sb strings.Builder
 	var count int
-	timer := time.NewTimer(s.timeouts.FirstToken)
+	timer := time.NewTimer(s.config.Timeouts.FirstToken)
 	defer timer.Stop()
 loop:
 	for {
@@ -137,11 +137,11 @@ loop:
 			sb.WriteString(token.Text)
 			count++
 		case <-timer.C:
-			log.Printf("inference timeout, cannot be more than %v", s.timeouts.Idle)
+			log.Printf("inference timeout, cannot be more than %v", s.config.Timeouts.Idle)
 			writeError(w, http.StatusGatewayTimeout, "inference_timeout", "inference time out")
 			return
 		}
-		timer.Reset(s.timeouts.Idle)
+		timer.Reset(s.config.Timeouts.Idle)
 	}
 	err := ctx.Err()
 	switch {
@@ -162,7 +162,7 @@ loop:
 
 func (s *Server) streamTokens(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var count int
-	timer := time.NewTimer(s.timeouts.FirstToken)
+	timer := time.NewTimer(s.config.Timeouts.FirstToken)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, 500, "internal_error", "streaming not supported")
@@ -196,7 +196,7 @@ loop:
 			flusher.Flush()
 			count++
 		case <-timer.C:
-			log.Printf("inference timeout, cannot be more than %v", s.timeouts.Idle)
+			log.Printf("inference timeout, cannot be more than %v", s.config.Timeouts.Idle)
 			err := writeSSE(w, "error", errorResponse{Code: "inference_timeout", Message: "inference timeout"})
 			if err != nil {
 				log.Printf("Error write fail: %v", err)
@@ -204,7 +204,7 @@ loop:
 			flusher.Flush()
 			return
 		}
-		timer.Reset(s.timeouts.Idle)
+		timer.Reset(s.config.Timeouts.Idle)
 	}
 	err := ctx.Err()
 	switch {
