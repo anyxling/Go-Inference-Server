@@ -101,13 +101,17 @@ After streaming starts, the HTTP status can no longer be changed, so the service
 
 ## 6. Timeouts and cancellation
 
-- Request-body read timeout: 5 seconds.
-- Worker connection timeout: 2 seconds.
-- Time-to-first-token timeout: 30 seconds.
-- Idle time between tokens: 15 seconds.
-- Maximum total inference time: 2 minutes.
+| Timeout | Default | Enforced by |
+|---|---|---|
+| Request-body read | 5 seconds | `http.Server` read timeouts |
+| Worker connection | 2 seconds | The worker client, inside `Generate` |
+| Time to first token | 30 seconds | Timer in the handler's token loop |
+| Idle time between tokens | 15 seconds | Same timer, reset after each token |
+| Maximum total inference time | 2 minutes | Context deadline on the request |
 
-The Go request context is cancelled when the client disconnects, a timeout expires, or the service shuts down. Cancellation is propagated to the worker, which must stop generation and release its KV-cache and GPU capacity.
+The three handler-level timeouts are configurable. When any of them fires, a non-streaming request receives `504 inference_timeout` and a streaming request receives an `error` event with that code.
+
+The Go request context is cancelled when the client disconnects, the total deadline expires, or the service shuts down. Cancellation is propagated to the worker, which must stop generation and release its KV-cache and GPU capacity. A client disconnect produces no response and no error event, since there is no one to receive it.
 
 ## 7. Concurrency behavior
 
