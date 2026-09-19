@@ -122,3 +122,18 @@ The limit is part of the server configuration and defaults to 2. It applies only
 Requests beyond the active limit are not queued in version 1. They receive `503 Service Unavailable` with code `capacity_exceeded` and `Retry-After: 1`. A slot is released when a request completes, fails, times out, or is cancelled.
 
 During graceful shutdown, the service rejects new requests, gives active requests up to 30 seconds to finish, and then cancels the remainder.
+
+## 8. Configuration
+
+All limits are command-line flags with the defaults below. Durations accept Go duration syntax such as `30s` or `2m`. The service refuses to start if any value is zero or negative.
+
+| Flag | Default | Section |
+|---|---|---|
+| `-addr` | `:8080` | Listen address |
+| `-max-active` | `2` | 7 |
+| `-max-output-tokens` | `1024` | 3 |
+| `-request-body-limit` | `1048576` | 3 |
+| `-total-timeout` | `2m` | 6 |
+| `-first-token-timeout` | `30s` | 6 |
+| `-idle-timeout` | `15s` | 6 |
+| `-shutdown-timeout` | `30s` | 7 |
