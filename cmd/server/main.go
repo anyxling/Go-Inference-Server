@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/monikaliu/go-inference-server/internal/api"
@@ -10,6 +16,9 @@ import (
 )
 
 func main() {
+	baseCtx, cancelAll := context.WithCancel(context.Background())
+	defer cancelAll()
+
 	mux := http.NewServeMux()
 
 	server := http.Server{
@@ -22,9 +31,41 @@ func main() {
 	app := api.NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
 		Delay:  100 * time.Millisecond,
-	}, api.Config{Timeouts: api.DefaultTimeouts(), MaxActive: 2})
+	}, api.DefaultConfig())
 
 	mux.HandleFunc("GET /health", app.HealthHandler)
 	mux.HandleFunc("POST /v1/inference", app.InferenceHandler)
-	log.Fatal(server.ListenAndServe())
+
+	server.BaseContext = func(net.Listener) context.Context { return baseCtx }
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		log.Printf("shutdown signal received")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		err := server.Shutdown(shutdownCtx)
+		if err != nil {
+			log.Printf("graceful shutdown timed out, cancelling active requests")
+			cancelAll()
+			server.Close()
+		}
+
+		err = <-errCh
+		if !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("server exited with error: %v", err)
+		}
+	case err := <-errCh:
+		log.Printf("server exited with error %v", err)
+		return
+	}
 }
