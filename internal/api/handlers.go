@@ -96,6 +96,14 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit))
 		return
 	}
+	select {
+	case s.slots <- struct{}{}:
+		defer func() { <-s.slots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusServiceUnavailable, "capacity_exceeded", fmt.Sprintf("server at capacity %d, retry later", s.config.MaxActive))
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeouts.Total)
 	defer cancel()
 	req := worker.Request{
