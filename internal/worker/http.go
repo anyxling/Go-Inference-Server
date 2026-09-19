@@ -51,7 +51,8 @@ func (c *HTTPClient) Generate(ctx context.Context, req Request) (<-chan Token, e
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("response status wrong %w", httpResp.StatusCode)
+		httpResp.Body.Close()
+		return nil, fmt.Errorf("response status wrong %d", httpResp.StatusCode)
 	}
 
 	ch := make(chan Token)
@@ -73,7 +74,7 @@ func (c *HTTPClient) Generate(ctx context.Context, req Request) (<-chan Token, e
 			err := json.Unmarshal(scanner.Bytes(), &line)
 			if err != nil {
 				send(Token{Err: err})
-					return
+				return
 			}
 			switch {
 			case line.Error != "":
@@ -82,8 +83,9 @@ func (c *HTTPClient) Generate(ctx context.Context, req Request) (<-chan Token, e
 			case line.Done:
 				return
 			default:
-				send(Token{Text: line.Text})
-				return
+				if !send(Token{Text: line.Text}) {
+					return
+				}
 			}
 		}
 		err := scanner.Err()
