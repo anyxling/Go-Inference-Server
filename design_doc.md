@@ -9,14 +9,16 @@ Build a small Go service that accepts text-inference requests and streams genera
 ```mermaid
 flowchart TD
     C["Client"] -->|"HTTP POST"| G["Go inference service"]
-    G -->|"Submit request"| W["Inference worker"]
+    G -->|"HTTP POST /generate"| W["Inference worker (Python)"]
     W -->|"Run model"| GPU["Single GPU"]
     GPU -->|"Generated tokens"| W
-    W -->|"Token stream"| G
+    W -->|"NDJSON token stream"| G
     G -->|"SSE events"| C
 ```
 
 The Go service owns the public HTTP API, validation, request IDs, admission control, timeouts, cancellation, metrics, and SSE streaming. The inference worker owns tokenization, model execution, KV-cache management, and continuous batching. The GPU performs the model computations.
+
+The Go service and the worker are separate processes on the same machine and communicate over plain HTTP using the protocol in section 9. The Go side talks to the worker through a `Generator` interface, so the transport can be replaced without changing the handlers.
 
 ## 3. API
 
@@ -137,3 +139,44 @@ All limits are command-line flags with the defaults below. Durations accept Go d
 | `-first-token-timeout` | `30s` | 6 |
 | `-idle-timeout` | `15s` | 6 |
 | `-shutdown-timeout` | `30s` | 7 |
+| `-worker-url` | empty | 9. When empty, a built-in fake worker is used. |
+
+## 9. Worker protocol
+
+The worker is a separate HTTP process, in version 1 a Python script. The Go service is its only client. The protocol is deliberately simpler than the public API: no request IDs, no SSE, no versioning.
+
+### POST /generate
+
+Request body:
+
+```json
+{
+  "model": "small-llm",
+  "prompt": "Explain graph databases.",
+  "max_output_tokens": 256,
+  "temperature": 0.7
+}
+```
+
+The response is `200 OK` with `Content-Type: application/x-ndjson`. Each line is one JSON object, flushed as soon as it is produced:
+
+```
+{"text":"A graph"}
+{"text":" database"}
+{"done":true,"finish_reason":"stop"}
+```
+
+- A `text` line carries one generated token.
+- Exactly one `done` line ends a successful stream. `finish_reason` is `stop` when the model ended generation or `length` when `max_output_tokens` was reached.
+- If generation fails after the stream has started, the worker writes `{"error":"<message>"}` as the final line and closes the response. No `done` line follows.
+- Any status other than 200 means the worker could not start generation. The Go service reports this to its client as `503 worker_unavailable`.
+
+The worker must stop generating and release GPU resources when the Go service closes the connection, which happens on client disconnect, timeout, or shutdown.
+
+### GET /health
+
+Returns `200 OK` when the worker process is running and its model is loaded. The Go service calls this for its own `GET /ready` endpoint and reports any failure as `503 worker_unavailable`.
+
+### Timeouts
+
+The Go service applies the 2 second worker connection timeout from section 6 when dialing the worker. It applies no timeout to reading the response body, because the per-token and total timeouts in section 6 already bound how long a stream may run.
