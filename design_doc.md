@@ -117,6 +117,8 @@ The Go request context is cancelled when the client disconnects, the total deadl
 
 Version 1 uses one worker on one GPU. The worker may run several active requests together using continuous batching; it does not need to finish one entire response before advancing another. The exact active-request limit is configurable and should start conservatively, for example at two requests, until benchmarking determines safe GPU memory usage.
 
-Requests beyond the active limit are not queued in version 1. They receive `503 Service Unavailable` with `Retry-After: 1`. A slot is released when a request completes, fails, times out, or is cancelled.
+The limit is part of the server configuration and defaults to 2. It applies only to `POST /v1/inference`; health and readiness endpoints are never capacity-limited. A slot is acquired after request validation succeeds, so invalid requests never consume capacity.
+
+Requests beyond the active limit are not queued in version 1. They receive `503 Service Unavailable` with code `capacity_exceeded` and `Retry-After: 1`. A slot is released when a request completes, fails, times out, or is cancelled.
 
 During graceful shutdown, the service rejects new requests, gives active requests up to 30 seconds to finish, and then cancels the remainder.
