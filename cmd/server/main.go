@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"net"
 	"net/http"
@@ -16,13 +17,34 @@ import (
 )
 
 func main() {
+	defaults := api.DefaultConfig()
+
+	totalTimeout := flag.Duration("total-timeout", defaults.Timeouts.Total, "total timeouts allowed")
+	firstTokenTimeout := flag.Duration("first-token-timeout", defaults.Timeouts.FirstToken, "timeouts for first token")
+	idleTimeout := flag.Duration("idle-timeout", defaults.Timeouts.Idle, "timeouts for idling")
+	maxActive := flag.Int("max-active", defaults.MaxActive, "the max number of active requests")
+	maxOutputTokens := flag.Int("max-output-tokens", defaults.MaxOutputTokensLimit, "the max number of output tokens for LLM")
+	requestBodyLimit := flag.Int64("request-body-limit", defaults.RequestBodyLimit, "body limit for request")
+	addr := flag.String("addr", ":8080", "the port to listen to")
+	shutdownTimeout := flag.Duration("shutdown-timeout", 30*time.Second, "timeouts for shut down")
+
+	flag.Parse()
+
+	timeouts := api.Timeouts{Total: *totalTimeout, FirstToken: *firstTokenTimeout, Idle: *idleTimeout}
+
+	config := api.Config{Timeouts: timeouts, MaxActive: *maxActive, MaxOutputTokensLimit: *maxOutputTokens, RequestBodyLimit: *requestBodyLimit}
+
+	if err := config.Validate(); err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
+
 	baseCtx, cancelAll := context.WithCancel(context.Background())
 	defer cancelAll()
 
 	mux := http.NewServeMux()
 
 	server := http.Server{
-		Addr:              ":8080",
+		Addr:              *addr,
 		Handler:           api.RequestID(mux),
 		ReadTimeout:       5 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -31,7 +53,7 @@ func main() {
 	app := api.NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
 		Delay:  100 * time.Millisecond,
-	}, api.DefaultConfig())
+	}, config)
 
 	mux.HandleFunc("GET /health", app.HealthHandler)
 	mux.HandleFunc("POST /v1/inference", app.InferenceHandler)
@@ -50,7 +72,7 @@ func main() {
 	case <-ctx.Done():
 		log.Printf("shutdown signal received")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 		defer cancel()
 
 		err := server.Shutdown(shutdownCtx)

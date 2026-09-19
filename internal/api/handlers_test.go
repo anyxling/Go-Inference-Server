@@ -16,8 +16,15 @@ func shortTimeouts(t time.Duration, f time.Duration, i time.Duration) Timeouts {
 	return Timeouts{Total: t, FirstToken: f, Idle: i}
 }
 
+func testConfig(timeouts Timeouts, maxActive int) Config {
+	cfg := DefaultConfig()
+	cfg.Timeouts = timeouts
+	cfg.MaxActive = maxActive
+	return cfg
+}
+
 func TestHealthHandler(t *testing.T) {
-	server := NewServer(&worker.Fake{}, Config{Timeouts: DefaultTimeouts(), MaxActive: 100})
+	server := NewServer(&worker.Fake{}, testConfig(DefaultTimeouts(), 100))
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
@@ -29,7 +36,7 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestInferenceHandler(t *testing.T) {
-	server := NewServer(&worker.Fake{}, Config{Timeouts: DefaultTimeouts(), MaxActive: 100})
+	server := NewServer(&worker.Fake{}, testConfig(DefaultTimeouts(), 100))
 	prompt := strings.Repeat("a", 1<<20)
 	tests := []struct {
 		name       string
@@ -63,7 +70,7 @@ func TestInferenceHandler(t *testing.T) {
 }
 
 func TestInferenceHandlerWorkerUnavailable(t *testing.T) {
-	server := NewServer(&worker.Fake{Err: worker.ErrFakeFailure}, Config{Timeouts: DefaultTimeouts(), MaxActive: 100})
+	server := NewServer(&worker.Fake{Err: worker.ErrFakeFailure}, testConfig(DefaultTimeouts(), 100))
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
 
@@ -88,7 +95,7 @@ func TestInferenceHandlerInternalError(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens:    []string{"a", "b", "c"},
 		FailAfter: 1,
-	}, Config{Timeouts: DefaultTimeouts(), MaxActive: 100})
+	}, testConfig(DefaultTimeouts(), 100))
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
 
@@ -113,7 +120,7 @@ func TestInferenceHandlerSuccess(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
 		Delay:  0,
-	}, Config{Timeouts: DefaultTimeouts(), MaxActive: 100})
+	}, testConfig(DefaultTimeouts(), 100))
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
 
@@ -137,7 +144,7 @@ func TestInferenceHandlerSuccess(t *testing.T) {
 func TestInferenceHandlerStream(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
-	}, Config{Timeouts: DefaultTimeouts(), MaxActive: 100})
+	}, testConfig(DefaultTimeouts(), 100))
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
 	server.InferenceHandler(rec, req)
@@ -172,7 +179,7 @@ func TestInferenceHandlerStreamError(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens:    []string{"a", "b", "c"},
 		FailAfter: 1,
-	}, Config{Timeouts: shortTimeouts(50*time.Millisecond, time.Second, time.Second), MaxActive: 100})
+	}, testConfig(shortTimeouts(50*time.Millisecond, time.Second, time.Second), 100))
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
 	server.InferenceHandler(rec, req)
@@ -199,7 +206,7 @@ func TestInferenceHandlerTotalTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
 		Delay:  20 * time.Millisecond,
-	}, Config{Timeouts: shortTimeouts(50*time.Millisecond, time.Second, time.Second), MaxActive: 100})
+	}, testConfig(shortTimeouts(50*time.Millisecond, time.Second, time.Second), 100))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
@@ -223,7 +230,7 @@ func TestInferenceHandlerStreamTotalTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
 		Delay:  20 * time.Millisecond,
-	}, Config{Timeouts: shortTimeouts(50*time.Millisecond, time.Second, time.Second), MaxActive: 100})
+	}, testConfig(shortTimeouts(50*time.Millisecond, time.Second, time.Second), 100))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
@@ -251,7 +258,7 @@ func TestInferenceHandlerFirstTokenTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
 		Delay:  200 * time.Millisecond,
-	}, Config{Timeouts: shortTimeouts(time.Second, 50*time.Millisecond, time.Second), MaxActive: 100})
+	}, testConfig(shortTimeouts(time.Second, 50*time.Millisecond, time.Second), 100))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
@@ -275,7 +282,7 @@ func TestInferenceHandlerIdleTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
 		Delay:  100 * time.Millisecond,
-	}, Config{Timeouts: shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond), MaxActive: 100})
+	}, testConfig(shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond), 100))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()
@@ -299,7 +306,7 @@ func TestInferenceHandlerStreamFirstTokenTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
 		Delay:  200 * time.Millisecond,
-	}, Config{Timeouts: shortTimeouts(time.Second, 50*time.Millisecond, time.Second), MaxActive: 100})
+	}, testConfig(shortTimeouts(time.Second, 50*time.Millisecond, time.Second), 100))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
@@ -327,7 +334,7 @@ func TestInferenceHandlerStreamIdleTimeout(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
 		Delay:  100 * time.Millisecond,
-	}, Config{Timeouts: shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond), MaxActive: 100})
+	}, testConfig(shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond), 100))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
 	rec := httptest.NewRecorder()
@@ -359,7 +366,7 @@ func TestInferenceHandlerClientDisconnect(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
 		Delay:  50 * time.Millisecond,
-	}, Config{Timeouts: DefaultTimeouts(), MaxActive: 100})
+	}, testConfig(DefaultTimeouts(), 100))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi", "stream":true}`))
@@ -399,7 +406,7 @@ func TestInferenceHandlerClientDisconnect(t *testing.T) {
 func TestInferenceHandlerReleaseSuccess(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
-	}, Config{Timeouts: shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond), MaxActive: 1})
+	}, testConfig(shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond), 1))
 
 	// first request
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
@@ -424,7 +431,7 @@ func TestInferenceHandlerCapacityExceeded(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c", "d", "e"},
 		Delay:  100 * time.Millisecond,
-	}, Config{Timeouts: DefaultTimeouts(), MaxActive: 2})
+	}, testConfig(DefaultTimeouts(), 2))
 
 	done := make(chan *httptest.ResponseRecorder, 2)
 	for i := 0; i < 2; i++ {
@@ -467,7 +474,7 @@ func TestInferenceHandlerReleaseFail(t *testing.T) {
 	server := NewServer(&worker.Fake{
 		Tokens: []string{"a", "b", "c"},
 		Delay:  200 * time.Millisecond,
-	}, Config{Timeouts: shortTimeouts(time.Second, 50*time.Millisecond, 50*time.Millisecond), MaxActive: 1})
+	}, testConfig(shortTimeouts(time.Second, 50*time.Millisecond, 50*time.Millisecond), 1))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
 	rec := httptest.NewRecorder()

@@ -13,9 +13,7 @@ import (
 	"github.com/monikaliu/go-inference-server/internal/worker"
 )
 
-const maxOutputTokensLimit = 1024 // move to config later
 const defaultMaxOutputTokens = 256
-const requestBodyLimit = 1 << 20
 
 type inferenceRequest struct {
 	Model           string  `json:"model"`
@@ -65,13 +63,13 @@ func (s *Server) HealthHandler(w http.ResponseWriter, _ *http.Request) {}
 
 func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 	var inferenceReq inferenceRequest
-	maxReader := http.MaxBytesReader(w, r.Body, requestBodyLimit)
+	maxReader := http.MaxBytesReader(w, r.Body, s.config.RequestBodyLimit)
 	decoder := json.NewDecoder(maxReader)
 	err := decoder.Decode(&inferenceReq)
 	if err != nil {
 		var maxByteErr *http.MaxBytesError
 		if errors.As(err, &maxByteErr) {
-			writeError(w, 413, "request_too_large", fmt.Sprintf("Request cannot exceed %d bytes", requestBodyLimit))
+			writeError(w, 413, "request_too_large", fmt.Sprintf("Request cannot exceed %d bytes", s.config.RequestBodyLimit))
 			return
 		}
 		writeError(w, 400, "invalid_request", "Bad request")
@@ -92,8 +90,8 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 	if inferenceReq.MaxOutputTokens == 0 {
 		inferenceReq.MaxOutputTokens = defaultMaxOutputTokens
 	}
-	if inferenceReq.MaxOutputTokens > maxOutputTokensLimit || inferenceReq.MaxOutputTokens < 1 {
-		writeError(w, 400, "invalid_request", fmt.Sprintf("max_output_tokens should be within 1-%d", maxOutputTokensLimit))
+	if inferenceReq.MaxOutputTokens > s.config.MaxOutputTokensLimit || inferenceReq.MaxOutputTokens < 1 {
+		writeError(w, 400, "invalid_request", fmt.Sprintf("max_output_tokens should be within 1-%d", s.config.MaxOutputTokensLimit))
 		return
 	}
 	select {
