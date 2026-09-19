@@ -9,10 +9,12 @@ import (
 type Server struct {
 	generator worker.Generator
 	config    Config
+	slots     chan struct{}
 }
 
-func NewServer(g worker.Generator, c Config) *Server {
-	return &Server{generator: g, config: c}
+func NewServer(g worker.Generator, cfg Config) *Server {
+	slots := make(chan struct{}, cfg.MaxActive)
+	return &Server{generator: g, config: cfg, slots: slots}
 }
 
 type Config struct {
