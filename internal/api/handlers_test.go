@@ -395,3 +395,93 @@ func TestInferenceHandlerClientDisconnect(t *testing.T) {
 		t.Errorf("stream should be canceled without error, got %s, want %s", body, "event: error")
 	}
 }
+
+func TestInferenceHandlerReleaseSuccess(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c"},
+	}, Config{Timeouts: shortTimeouts(time.Second, 500*time.Millisecond, 50*time.Millisecond), MaxActive: 1})
+
+	// first request
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	// second request
+	req = httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec = httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestInferenceHandlerCapacityExceeded(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c", "d", "e"},
+		Delay:  100 * time.Millisecond,
+	}, Config{Timeouts: DefaultTimeouts(), MaxActive: 2})
+
+	done := make(chan *httptest.ResponseRecorder, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+			rec := httptest.NewRecorder()
+			server.InferenceHandler(rec, req)
+			done <- rec
+		}()
+	}
+
+	time.Sleep(30 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+
+	if !strings.Contains(body, `"code":"capacity_exceeded"`) {
+		t.Errorf("wrong error code, got %s, want %s", body, `"code":"capacity_exceeded"`)
+	}
+
+	if rec.Header().Get("Retry-After") != "1" {
+		t.Errorf("got Retry-After %s, want %s", rec.Header().Get("Retry-After"), "1")
+	}
+
+	for i := 0; i < 2; i++ {
+		rec := <-done
+		if rec.Code != http.StatusOK {
+			t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+	}
+}
+
+func TestInferenceHandlerReleaseFail(t *testing.T) {
+	server := NewServer(&worker.Fake{
+		Tokens: []string{"a", "b", "c"},
+		Delay:  200 * time.Millisecond,
+	}, Config{Timeouts: shortTimeouts(time.Second, 50*time.Millisecond, 50*time.Millisecond), MaxActive: 1})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Errorf("got %v, want %v", rec.Code, http.StatusGatewayTimeout)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/inference", strings.NewReader(`{"model":"llm","prompt":"hi"}`))
+	rec = httptest.NewRecorder()
+	server.InferenceHandler(rec, req)
+
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Errorf("got %v, want %v", rec.Code, http.StatusGatewayTimeout)
+	}
+}
