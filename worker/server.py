@@ -70,6 +70,8 @@ class Handler(BaseHTTPRequestHandler):
             )
             model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
             streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=10)
+            results = {}
+            stop = threading.Event()
             generate_kwargs = dict(
                 model_inputs,
                 streamer=streamer,
@@ -77,8 +79,6 @@ class Handler(BaseHTTPRequestHandler):
                 stopping_criteria=StoppingCriteriaList([StopOnEvent(stop)]),
             )
 
-            results = {}
-            stop = threading.Event()
             def _generate():
                 try:
                     results["ids"] = model.generate(**generate_kwargs)
@@ -99,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
             except queue.Empty:
                 results.setdefault("error", "generation timed out")
-            except (BrokenPipeError, ConnectionResetError):
+            except (ConnectionError):
                 stop.set()
                 t.join()
                 return
@@ -117,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
             
             self.wfile.write((json.dumps({"done": True, "finish_reason": finish_reason}) + "\n").encode())
             self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError): return
+        except (ConnectionError): return
         
 
 if __name__ == "__main__":
