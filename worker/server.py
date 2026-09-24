@@ -6,6 +6,9 @@ import torch
 import queue
 
 PORT = 8000
+MAX_CONCURRENT = 4
+
+sem = threading.Semaphore(MAX_CONCURRENT)
 
 model_name = "Qwen/Qwen2.5-0.5B-Instruct"
 
@@ -49,6 +52,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
+
+        if not sem.acquire(blocking=False):
+                self.send_error(503)
+                return
+                
         try:
             try:
                 req = json.loads(raw)
@@ -95,18 +103,19 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 for chunk in streamer:
-                    self.wfile.write((json.dumps({"text": chunk}) + "\n").encode())
-                    self.wfile.flush()
+                    if chunk != "":
+                        self.wfile.write((json.dumps({"text": chunk}) + "\n").encode())
+                        self.wfile.flush()
             except queue.Empty:
                 results.setdefault("error", "generation timed out")
             except (ConnectionError):
                 stop.set()
-                t.join()
                 return
             finally:
                 stop.set()
-            t.join()
-
+                t.join()
+                sem.release()
+            
             if "error" in results:
                 self.wfile.write((json.dumps({"error": str(results["error"])}) + "\n").encode())
                 self.wfile.flush()
@@ -117,7 +126,8 @@ class Handler(BaseHTTPRequestHandler):
             
             self.wfile.write((json.dumps({"done": True, "finish_reason": finish_reason}) + "\n").encode())
             self.wfile.flush()
-        except (ConnectionError): return
+        except (ConnectionError): 
+            return
         
 
 if __name__ == "__main__":
