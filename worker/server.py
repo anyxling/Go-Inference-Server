@@ -1,7 +1,9 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer, StoppingCriteria, StoppingCriteriaList
 import threading
+import torch
+import queue
 
 PORT = 8000
 
@@ -19,7 +21,19 @@ if isinstance(EOS_IDS, int):
     EOS_IDS = [EOS_IDS]
 
 
+class StopOnEvent(StoppingCriteria):
+    def __init__(self, stop_event):
+        self.stop = stop_event
+
+    def __call__(self, input_ids, scores, **kwargs):
+        # called after each new token
+        # return True → stop generating
+        done = self.stop.is_set()
+        return torch.full((input_ids.shape[0],), done, dtype=torch.bool, device=input_ids.device)
+
+
 class Handler(BaseHTTPRequestHandler):
+
     def do_GET(self):
         if self.path == "/health":
             self.send_response(200)
@@ -55,16 +69,22 @@ class Handler(BaseHTTPRequestHandler):
                 add_generation_prompt=True
             )
             model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-            streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+            streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=10)
             generate_kwargs = dict(
                 model_inputs,
                 streamer=streamer,
                 max_new_tokens=req.get("max_output_tokens", 256),
+                stopping_criteria=StoppingCriteriaList([StopOnEvent(stop)]),
             )
 
             results = {}
+            stop = threading.Event()
             def _generate():
-                results["ids"] = model.generate(**generate_kwargs)
+                try:
+                    results["ids"] = model.generate(**generate_kwargs)
+                except Exception as e:
+                    results["error"] = e
+                    streamer.end()
 
             t = threading.Thread(target=_generate)
             t.start()
@@ -73,20 +93,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/x-ndjson")
             self.end_headers()
 
-            
-            for chunk in streamer:
-                self.wfile.write((json.dumps({"text": chunk}) + "\n").encode())
-                self.wfile.flush()
-
+            try:
+                for chunk in streamer:
+                    self.wfile.write((json.dumps({"text": chunk}) + "\n").encode())
+                    self.wfile.flush()
+            except queue.Empty:
+                results.setdefault("error", "generation timed out")
+            except (BrokenPipeError, ConnectionResetError):
+                stop.set()
+                t.join()
+                return
+            finally:
+                stop.set()
             t.join()
 
-            last_token = result["ids"][0][-1].item()
+            if "error" in results:
+                self.wfile.write((json.dumps({"error": str(results["error"])}) + "\n").encode())
+                self.wfile.flush()
+                return
+
+            last_token = results["ids"][0][-1].item()
             finish_reason = "stop" if last_token in EOS_IDS else "length"
             
             self.wfile.write((json.dumps({"done": True, "finish_reason": finish_reason}) + "\n").encode())
             self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        except (BrokenPipeError, ConnectionResetError): return
+        
 
 if __name__ == "__main__":
     try:
