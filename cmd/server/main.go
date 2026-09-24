@@ -27,6 +27,7 @@ func main() {
 	requestBodyLimit := flag.Int64("request-body-limit", defaults.RequestBodyLimit, "body limit for request")
 	addr := flag.String("addr", ":8080", "the port to listen to")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 30*time.Second, "timeouts for shut down")
+	workerURL := flag.String("worker-url", "", "empty uses the built-in fake worker")
 
 	flag.Parse()
 
@@ -36,6 +37,17 @@ func main() {
 
 	if err := config.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
+	}
+
+	var gen worker.Generator
+
+	if *workerURL == "" {
+		gen = &worker.Fake{Tokens: []string{"a", "b", "c"}, Delay:  100 * time.Millisecond,}
+		log.Printf("empty worker url hence use default fake worker")
+	}
+	else {
+		gen = worker.NewHTTPClient(*workerURL, 2*time.Second)
+		log.Printf("use worker url %v", *workerURL)
 	}
 
 	baseCtx, cancelAll := context.WithCancel(context.Background())
@@ -50,10 +62,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	app := api.NewServer(&worker.Fake{
-		Tokens: []string{"a", "b", "c"},
-		Delay:  100 * time.Millisecond,
-	}, config)
+	app := api.NewServer(gen, config)
 
 	mux.HandleFunc("GET /health", app.HealthHandler)
 	mux.HandleFunc("POST /v1/inference", app.InferenceHandler)
