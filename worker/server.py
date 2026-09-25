@@ -8,7 +8,7 @@ import queue
 PORT = 8000
 MAX_CONCURRENT = 4
 
-sem = threading.Semaphore(MAX_CONCURRENT)
+sem = threading.BoundedSemaphore(MAX_CONCURRENT)
 
 model_name = "Qwen/Qwen2.5-0.5B-Instruct"
 
@@ -54,17 +54,19 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
 
         if not sem.acquire(blocking=False):
-                self.send_error(503)
-                return
-                
+            self.send_error(503)
+            return
+            
         try:
             try:
                 req = json.loads(raw)
-            except (json.JSONDecodeError):
+            except json.JSONDecodeError:
                 self.send_error(400)
+                sem.release()
                 return
             if not req.get("prompt"):
                 self.send_error(400)
+                sem.release()
                 return
 
             messages = [
@@ -108,26 +110,27 @@ class Handler(BaseHTTPRequestHandler):
                         self.wfile.flush()
             except queue.Empty:
                 results.setdefault("error", "generation timed out")
-            except (ConnectionError):
+            except ConnectionError:
                 stop.set()
                 return
             finally:
                 stop.set()
                 t.join()
-                sem.release()
             
-            if "error" in results:
-                self.wfile.write((json.dumps({"error": str(results["error"])}) + "\n").encode())
-                self.wfile.flush()
-                return
+                if "error" in results:
+                    self.wfile.write((json.dumps({"error": str(results["error"])}) + "\n").encode())
+                    self.wfile.flush()
+                    return
 
-            last_token = results["ids"][0][-1].item()
-            finish_reason = "stop" if last_token in EOS_IDS else "length"
-            
-            self.wfile.write((json.dumps({"done": True, "finish_reason": finish_reason}) + "\n").encode())
-            self.wfile.flush()
-        except (ConnectionError): 
+                last_token = results["ids"][0][-1].item()
+                finish_reason = "stop" if last_token in EOS_IDS else "length"
+                
+                self.wfile.write((json.dumps({"done": True, "finish_reason": finish_reason}) + "\n").encode())
+                self.wfile.flush()
+        except ConnectionError: 
             return
+        finally:
+            sem.release()
         
 
 if __name__ == "__main__":
