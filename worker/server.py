@@ -53,26 +53,25 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
 
+        try:
+            req = json.loads(raw)
+        except json.JSONDecodeError:
+            self.send_error(400)
+            return
+        if not req.get("prompt"):
+            self.send_error(400)
+            return
+        
         if not sem.acquire(blocking=False):
             self.send_error(503)
             return
             
         try:
-            try:
-                req = json.loads(raw)
-            except json.JSONDecodeError:
-                self.send_error(400)
-                sem.release()
-                return
-            if not req.get("prompt"):
-                self.send_error(400)
-                sem.release()
-                return
-
             messages = [
                 {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
                 {"role": "user", "content": req.get("prompt")}
             ]
+
             text = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -111,27 +110,25 @@ class Handler(BaseHTTPRequestHandler):
             except queue.Empty:
                 results.setdefault("error", "generation timed out")
             except ConnectionError:
-                stop.set()
                 return
             finally:
                 stop.set()
                 t.join()
             
-                if "error" in results:
-                    self.wfile.write((json.dumps({"error": str(results["error"])}) + "\n").encode())
-                    self.wfile.flush()
-                    return
-
-                last_token = results["ids"][0][-1].item()
-                finish_reason = "stop" if last_token in EOS_IDS else "length"
-                
-                self.wfile.write((json.dumps({"done": True, "finish_reason": finish_reason}) + "\n").encode())
+            if "error" in results:
+                self.wfile.write((json.dumps({"error": str(results["error"])}) + "\n").encode())
                 self.wfile.flush()
+                return
+
+            last_token = results["ids"][0][-1].item()
+            finish_reason = "stop" if last_token in EOS_IDS else "length"
+            
+            self.wfile.write((json.dumps({"done": True, "finish_reason": finish_reason}) + "\n").encode())
+            self.wfile.flush()
         except ConnectionError: 
             return
         finally:
             sem.release()
-        
 
 if __name__ == "__main__":
     try:
