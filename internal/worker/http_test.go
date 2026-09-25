@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func TestHTTPClientGenerate(t *testing.T) {
 		flusher.Flush()
 		fmt.Fprintln(w, `{"text":"immediately"}`)
 		flusher.Flush()
-		fmt.Fprintln(w, `{"done":true}`)
+		fmt.Fprintln(w, `{"done":true, "finish_reason":"stop"}`)
 		flusher.Flush()
 
 	}))
@@ -32,12 +31,27 @@ func TestHTTPClientGenerate(t *testing.T) {
 		t.Fatalf("token generation fail with %v", err)
 	}
 
-	var got []string
+	var got []Token
 	for token := range ch {
-		got = append(got, token.Text)
+		got = append(got, token)
 	}
-	if !slices.Equal(got, []string{"I want", "a new job", "immediately"}) {
-		t.Errorf("got %v, want %v", got, []string{"I want", "a new job", "immediately"})
+
+	wantTexts := []string{"I want", "a new job", "immediately"}
+
+	want := len(wantTexts) + 1
+	if len(got) != want {
+		t.Fatalf("got %d tokens, want %d", len(got), want)
+	}
+
+	for i, want := range wantTexts {
+		if got[i].Text != want || got[i].FinishReason != "" {
+			t.Errorf("token %d: got %+v, want text %q", i, got[i], want)
+		}
+	}
+
+	last := got[len(got)-1]
+	if last.Text != "" || last.FinishReason != "stop" {
+		t.Errorf("marker: got %+v, want empty text and finish_reason stop", last)
 	}
 }
 

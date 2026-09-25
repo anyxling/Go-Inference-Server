@@ -16,7 +16,9 @@ flowchart TD
     G -->|"SSE events"| C
 ```
 
-The Go service owns the public HTTP API, validation, request IDs, admission control, timeouts, cancellation, metrics, and SSE streaming. The inference worker owns tokenization, model execution, KV-cache management, and continuous batching. The GPU performs the model computations.
+The Go service owns the public HTTP API, validation, request IDs, admission control, timeouts, cancellation, metrics, and SSE streaming. The inference worker owns tokenization, model execution, and KV-cache management. The GPU performs the model computations.
+
+Version 1 does not batch. Each request to the worker runs as an independent `generate` call, and the worker bounds how many run at once. Continuous batching requires an engine such as vLLM and is a candidate for version 2; see section 10 for the baseline it would be measured against.
 
 The Go service and the worker are separate processes on the same machine and communicate over plain HTTP using the protocol in section 9. The Go side talks to the worker through a `Generator` interface, so the transport can be replaced without changing the handlers.
 
@@ -117,7 +119,7 @@ The Go request context is cancelled when the client disconnects, the total deadl
 
 ## 7. Concurrency behavior
 
-Version 1 uses one worker on one GPU. The worker may run several active requests together using continuous batching; it does not need to finish one entire response before advancing another. The exact active-request limit is configurable and should start conservatively, for example at two requests, until benchmarking determines safe GPU memory usage.
+Version 1 uses one worker on one GPU. The worker runs each active request as its own generation; it does not batch them. The active-request limit is configurable and should start conservatively, for example at two requests, until benchmarking determines safe GPU memory usage. The worker enforces the same limit on its side, so the two values must be kept equal.
 
 The limit is part of the server configuration and defaults to 2. It applies only to `POST /v1/inference`; health and readiness endpoints are never capacity-limited. A slot is acquired after request validation succeeds, so invalid requests never consume capacity.
 
@@ -143,7 +145,9 @@ All limits are command-line flags with the defaults below. Durations accept Go d
 
 ## 9. Worker protocol
 
-The worker is a separate HTTP process, in version 1 a Python script. The Go service is its only client. The protocol is deliberately simpler than the public API: no request IDs, no SSE, no versioning.
+The worker is a separate HTTP process, in version 1 a Python script running `Qwen/Qwen2.5-0.5B-Instruct` through Hugging Face `transformers` with `torch`. The Go service is its only client. The protocol is deliberately simpler than the public API: no request IDs, no SSE, no versioning.
+
+The worker loads the model before it binds its port, so until loading finishes connections are refused and the Go service reports `503 worker_unavailable`. It allows the same number of concurrent generations as the Go service's `-max-active` and answers `503` beyond that. `temperature` of 0 selects greedy decoding; any other value enables sampling at that temperature. Each request is wrapped in the model's chat template with a fixed system prompt.
 
 ### POST /generate
 
@@ -175,8 +179,42 @@ The worker must stop generating and release GPU resources when the Go service cl
 
 ### GET /health
 
-Returns `200 OK` when the worker process is running and its model is loaded. The Go service calls this for its own `GET /ready` endpoint and reports any failure as `503 worker_unavailable`.
+Returns `200 OK` when the worker process is running. Because the model is loaded before the port is bound, a successful response also means the model is ready. The Go service does not currently expose a `GET /ready` endpoint; a worker that is down surfaces as `503 worker_unavailable` on the first inference request.
 
 ### Timeouts
 
 The Go service applies the 2 second worker connection timeout from section 6 when dialing the worker. It applies no timeout to reading the response body, because the per-token and total timeouts in section 6 already bound how long a stream may run.
+
+## 10. Baseline performance
+
+The version 1 worker is measured before any batching engine is introduced, so that a later vLLM-backed worker can be compared against it behind the same Go service.
+
+### Method
+
+- Load generator: `cmd/loadgen`, a Go program that sends streaming requests through the Go service and records the arrival time of every SSE event.
+- Fixed prompt, `max_output_tokens` 128, `temperature` 0 so output is deterministic.
+- One warm-up request, excluded from timing.
+- Concurrency levels 1, 2, 4, 8, 16, with `-max-active` and the worker's limit raised to match. 50 requests per level.
+- GPU utilization sampled with `nvidia-smi` during each level.
+
+### Metrics
+
+| Metric | Definition |
+|---|---|
+| Time to first token | Request sent to first `token` event, p50 and p95 |
+| Per-stream rate | Tokens per second one client sees, between its first and last `token` |
+| Aggregate rate | Total tokens per second across all concurrent streams |
+| Total latency | Request sent to `done` event, p50 and p95 |
+| Rejections | Requests answered `503 capacity_exceeded` |
+
+### Results
+
+To be filled in. Record hardware, model, dtype, and git commit alongside the numbers.
+
+| Concurrency | TTFT p50 / p95 | Per-stream tok/s | Aggregate tok/s | Latency p50 / p95 | GPU util | Rejected |
+|---|---|---|---|---|---|---|
+| 1 | | | | | | |
+| 2 | | | | | | |
+| 4 | | | | | | |
+| 8 | | | | | | |
+| 16 | | | | | | |

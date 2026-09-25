@@ -6,7 +6,7 @@ import torch
 import queue
 
 PORT = 8000
-MAX_CONCURRENT = 4
+MAX_CONCURRENT = 2
 
 sem = threading.BoundedSemaphore(MAX_CONCURRENT)
 
@@ -85,8 +85,10 @@ class Handler(BaseHTTPRequestHandler):
                 model_inputs,
                 streamer=streamer,
                 max_new_tokens=req.get("max_output_tokens", 256),
+                temperature = float(req.get("temperature", 0)),
                 stopping_criteria=StoppingCriteriaList([StopOnEvent(stop)]),
             )
+            generate_kwargs["do_sample"] = True if generate_kwargs["temperature"] != 0 else False
 
             def _generate():
                 try:

@@ -31,6 +31,7 @@ type errorResponse struct {
 type inferenceResponse struct {
 	Text            string `json:"text"`
 	GeneratedTokens int    `json:"generated_tokens"`
+	FinishReason    string `json:"finish_reason"`
 }
 
 type tokenEvent struct {
@@ -126,6 +127,7 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeCollected(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var sb strings.Builder
 	var count int
+	var finishReason string
 	timer := time.NewTimer(s.config.Timeouts.FirstToken)
 	defer timer.Stop()
 loop:
@@ -139,6 +141,10 @@ loop:
 				log.Printf("generate token: %v", token.Err)
 				writeError(w, 500, "internal_error", "Token not generated successfully")
 				return
+			}
+			if token.FinishReason != "" {
+				finishReason = token.FinishReason
+				continue
 			}
 			sb.WriteString(token.Text)
 			count++
@@ -162,12 +168,14 @@ loop:
 	res := inferenceResponse{
 		Text:            sb.String(),
 		GeneratedTokens: count,
+		FinishReason:    finishReason,
 	}
 	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) streamTokens(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var count int
+	var finishReason string
 	timer := time.NewTimer(s.config.Timeouts.FirstToken)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -193,6 +201,10 @@ loop:
 				}
 				flusher.Flush()
 				return
+			}
+			if token.FinishReason != "" {
+				finishReason = token.FinishReason
+				continue
 			}
 			err := writeSSE(w, "token", tokenEvent{Text: token.Text})
 			if err != nil {
@@ -225,7 +237,7 @@ loop:
 		log.Printf("client got canceled: %v", err)
 		return
 	}
-	if err := writeSSE(w, "done", doneEvent{FinishReason: "stop", GeneratedTokens: count}); err != nil {
+	if err := writeSSE(w, "done", doneEvent{FinishReason: finishReason, GeneratedTokens: count}); err != nil {
 		log.Printf("Done write fail: %v", err)
 		return
 	}

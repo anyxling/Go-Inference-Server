@@ -53,6 +53,11 @@ func (f *Fake) Generate(ctx context.Context, req Request) (<-chan Token, error) 
 				return
 			}
 		}
+		select {
+		case ch <- Token{FinishReason: "stop"}:
+		case <-ctx.Done():
+			return
+		}
 	}()
 	return ch, nil
 }

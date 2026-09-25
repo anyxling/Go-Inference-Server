@@ -81,6 +81,7 @@ func (c *HTTPClient) Generate(ctx context.Context, req Request) (<-chan Token, e
 				send(Token{Err: errors.New(line.Error)})
 				return
 			case line.Done:
+				send(Token{FinishReason: line.FinishReason})
 				return
 			default:
 				if !send(Token{Text: line.Text}) {
