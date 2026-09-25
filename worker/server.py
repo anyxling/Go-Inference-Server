@@ -88,7 +88,8 @@ class Handler(BaseHTTPRequestHandler):
                 temperature = float(req.get("temperature", 0)),
                 stopping_criteria=StoppingCriteriaList([StopOnEvent(stop)]),
             )
-            generate_kwargs["do_sample"] = True if generate_kwargs["temperature"] != 0 else False
+            if generate_kwargs["temperature"] != 0:
+                generate_kwargs["do_sample"] = True
 
             def _generate():
                 try:
