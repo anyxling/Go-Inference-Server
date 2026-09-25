@@ -44,8 +44,7 @@ func main() {
 	if *workerURL == "" {
 		gen = &worker.Fake{Tokens: []string{"a", "b", "c"}, Delay:  100 * time.Millisecond,}
 		log.Printf("empty worker url hence use default fake worker")
-	}
-	else {
+	} else {
 		gen = worker.NewHTTPClient(*workerURL, 2*time.Second)
 		log.Printf("use worker url %v", *workerURL)
 	}
