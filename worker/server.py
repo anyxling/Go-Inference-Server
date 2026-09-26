@@ -4,9 +4,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStream
 import threading
 import torch
 import queue
+import os
 
 PORT = 8000
-MAX_CONCURRENT = 2
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", 2))
 
 sem = threading.BoundedSemaphore(MAX_CONCURRENT)
 
@@ -85,11 +86,14 @@ class Handler(BaseHTTPRequestHandler):
                 model_inputs,
                 streamer=streamer,
                 max_new_tokens=req.get("max_output_tokens", 256),
-                temperature = float(req.get("temperature", 0)),
                 stopping_criteria=StoppingCriteriaList([StopOnEvent(stop)]),
             )
-            if generate_kwargs["temperature"] != 0:
+            temperature = float(req.get("temperature", 0))
+            if temperature == 0:
+                generate_kwargs["do_sample"] = False
+            else:
                 generate_kwargs["do_sample"] = True
+                generate_kwargs["temperature"] = temperature
 
             def _generate():
                 try:
