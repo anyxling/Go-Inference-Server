@@ -20,10 +20,11 @@ type HTTPClient struct {
 }
 
 type workerLine struct {
-	Text         string `json:"text"`
-	Done         bool   `json:"done"`
-	FinishReason string `json:"finish_reason"`
-	Error        string `json:"error"`
+	Text            string `json:"text"`
+	Done            bool   `json:"done"`
+	GeneratedTokens int    `json: generated_tokens`
+	FinishReason    string `json:"finish_reason"`
+	Error           string `json:"error"`
 }
 
 func NewHTTPClient(baseURL string, connectTimeout time.Duration) *HTTPClient {

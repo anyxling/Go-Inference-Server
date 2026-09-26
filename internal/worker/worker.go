@@ -8,7 +8,8 @@ type Request struct {
 }
 
 type Token struct {
-	Text         string
-	Err          error
-	FinishReason string
+	Text            string
+	Err             error
+	GeneratedTokens int
+	FinishReason    string
 }

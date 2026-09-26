@@ -15,9 +15,16 @@ import (
 
 type result struct {
 	start, first, end time.Time
+	finishReason      string
+	generated         int
 	tokens            int
 	status            int
 	err               error
+}
+
+type doneData struct {
+	FinishReason    string `json:"finish_reason"`
+	GeneratedTokens int    `json:"generated_tokens"`
 }
 
 func doRequest(client *http.Client, url, body string) result {
@@ -39,20 +46,34 @@ func doRequest(client *http.Client, url, body string) result {
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	var event string
 	for scanner.Scan() {
-		if scanner.Text() == "event: token" {
-			if res.tokens == 0 {
-				res.first = time.Now()
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			data := strings.TrimPrefix(line, "data: ")
+			switch event {
+			case "token":
+				if res.tokens == 0 {
+					res.first = time.Now()
+				}
+				res.tokens++
+			case "done":
+				var d doneData
+				if err := json.Unmarshal([]byte(data), &d); err != nil {
+					res.err = fmt.Errorf("bad done event: %w", err)
+					return res
+				}
+				res.finishReason = d.FinishReason
+				res.generated = d.GeneratedTokens
+				res.end = time.Now()
+				return res
+			case "error":
+				res.err = errors.New("stream error: " + data)
+				return res
 			}
-			res.tokens++
-		}
-		if scanner.Text() == "event: done" {
-			res.end = time.Now()
-			return res
-		}
-		if scanner.Text() == "event: error" {
-			res.err = errors.New("stream error")
-			return res
 		}
 	}
 	if scanner.Err() != nil {

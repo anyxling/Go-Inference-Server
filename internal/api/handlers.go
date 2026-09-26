@@ -237,7 +237,7 @@ loop:
 		log.Printf("client got canceled: %v", err)
 		return
 	}
-	if err := writeSSE(w, "done", doneEvent{FinishReason: finishReason, GeneratedTokens: count}); err != nil {
+	if err := writeSSE(w, "done", doneEvent{FinishReason: finishReason, GeneratedTokens: token.GeneratedTokens}); err != nil {
 		log.Printf("Done write fail: %v", err)
 		return
 	}
