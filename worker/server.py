@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
 
             last_token = results["ids"][0][-1].item()
             finish_reason = "stop" if last_token in EOS_IDS else "length"
-            generated_tokens = results["ids"][0].shape[0] - model_inputs.shape[1]
+            generated_tokens = results["ids"][0].shape[0] - model_inputs["input_ids"].shape[1]
             self.wfile.write((json.dumps({"done": True, "generated_tokens": generated_tokens, "finish_reason": finish_reason}) + "\n").encode())
             self.wfile.flush()
         except ConnectionError: 

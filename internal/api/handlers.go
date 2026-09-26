@@ -126,8 +126,8 @@ func (s *Server) InferenceHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeCollected(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
 	var sb strings.Builder
-	var count int
 	var finishReason string
+	var generatedTokens int
 	timer := time.NewTimer(s.config.Timeouts.FirstToken)
 	defer timer.Stop()
 loop:
@@ -144,10 +144,10 @@ loop:
 			}
 			if token.FinishReason != "" {
 				finishReason = token.FinishReason
+				generatedTokens = token.GeneratedTokens
 				continue
 			}
 			sb.WriteString(token.Text)
-			count++
 		case <-timer.C:
 			log.Printf("inference timeout, cannot be more than %v", s.config.Timeouts.Idle)
 			writeError(w, http.StatusGatewayTimeout, "inference_timeout", "inference time out")
@@ -167,15 +167,15 @@ loop:
 	}
 	res := inferenceResponse{
 		Text:            sb.String(),
-		GeneratedTokens: count,
+		GeneratedTokens: generatedTokens,
 		FinishReason:    finishReason,
 	}
 	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) streamTokens(ctx context.Context, w http.ResponseWriter, ch <-chan worker.Token) {
-	var count int
 	var finishReason string
+	var generatedTokens int
 	timer := time.NewTimer(s.config.Timeouts.FirstToken)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -204,6 +204,7 @@ loop:
 			}
 			if token.FinishReason != "" {
 				finishReason = token.FinishReason
+				generatedTokens = token.GeneratedTokens
 				continue
 			}
 			err := writeSSE(w, "token", tokenEvent{Text: token.Text})
@@ -212,7 +213,6 @@ loop:
 				return
 			}
 			flusher.Flush()
-			count++
 		case <-timer.C:
 			log.Printf("inference timeout, cannot be more than %v", s.config.Timeouts.Idle)
 			err := writeSSE(w, "error", errorResponse{Code: "inference_timeout", Message: "inference timeout"})
@@ -237,7 +237,7 @@ loop:
 		log.Printf("client got canceled: %v", err)
 		return
 	}
-	if err := writeSSE(w, "done", doneEvent{FinishReason: finishReason, GeneratedTokens: token.GeneratedTokens}); err != nil {
+	if err := writeSSE(w, "done", doneEvent{FinishReason: finishReason, GeneratedTokens: generatedTokens}); err != nil {
 		log.Printf("Done write fail: %v", err)
 		return
 	}

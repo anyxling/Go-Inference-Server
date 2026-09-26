@@ -22,7 +22,7 @@ type HTTPClient struct {
 type workerLine struct {
 	Text            string `json:"text"`
 	Done            bool   `json:"done"`
-	GeneratedTokens int    `json: generated_tokens`
+	GeneratedTokens int    `json:"generated_tokens"`
 	FinishReason    string `json:"finish_reason"`
 	Error           string `json:"error"`
 }
@@ -82,7 +82,7 @@ func (c *HTTPClient) Generate(ctx context.Context, req Request) (<-chan Token, e
 				send(Token{Err: errors.New(line.Error)})
 				return
 			case line.Done:
-				send(Token{FinishReason: line.FinishReason})
+				send(Token{FinishReason: line.FinishReason, GeneratedTokens: line.GeneratedTokens})
 				return
 			default:
 				if !send(Token{Text: line.Text}) {
