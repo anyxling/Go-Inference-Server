@@ -28,6 +28,8 @@ func main() {
 	addr := flag.String("addr", ":8080", "the port to listen to")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 30*time.Second, "timeouts for shut down")
 	workerURL := flag.String("worker-url", "", "empty uses the built-in fake worker")
+	workerKind := flag.String("worker-kind", "http", "http (worker/server.py protocol) or vllm (OpenAI-compatible)")
+	workerModel := flag.String("worker-model", "Qwen/Qwen2.5-0.5B-Instruct", "model name sent to a vllm worker")
 
 	flag.Parse()
 
@@ -41,12 +43,16 @@ func main() {
 
 	var gen worker.Generator
 
-	if *workerURL == "" {
-		gen = &worker.Fake{Tokens: []string{"a", "b", "c"}, Delay: 100 * time.Millisecond}
+	switch {
+	case *workerURL == "":
+		gen = &worker.Fake{Tokens: []string{"a", "b", "c"}, Delay: 100*time.Millisecond}
 		log.Printf("empty worker url hence use default fake worker")
-	} else {
+	case *workerKind == "vllm":
+		gen = worker.NewVLLMClient(*workerURL, *workerModel, 2*time.Second)
+		log.Printf("using vllm")
+	default:
 		gen = worker.NewHTTPClient(*workerURL, 2*time.Second)
-		log.Printf("use worker url %v", *workerURL)
+		log.Printf("using http")
 	}
 
 	baseCtx, cancelAll := context.WithCancel(context.Background())
@@ -57,8 +63,8 @@ func main() {
 	server := http.Server{
 		Addr:              *addr,
 		Handler:           api.RequestID(mux),
-		ReadTimeout:       5 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5*time.Second,
+		ReadHeaderTimeout: 5*time.Second,
 	}
 
 	app := api.NewServer(gen, config)
