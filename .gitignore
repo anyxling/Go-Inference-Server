@@ -1,3 +1,4 @@
 .venv
-body.json
+*.json
 *.exe
+deploy/certs/
