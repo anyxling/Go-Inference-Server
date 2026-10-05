@@ -45,7 +45,7 @@ func main() {
 
 	switch {
 	case *workerURL == "":
-		gen = &worker.Fake{Tokens: []string{"a", "b", "c"}, Delay: 100*time.Millisecond}
+		gen = &worker.Fake{Tokens: []string{"a", "b", "c"}, Delay: 100 * time.Millisecond}
 		log.Printf("empty worker url hence use default fake worker")
 	case *workerKind == "vllm":
 		gen = worker.NewVLLMClient(*workerURL, *workerModel, 2*time.Second)
@@ -63,8 +63,8 @@ func main() {
 	server := http.Server{
 		Addr:              *addr,
 		Handler:           api.RequestID(mux),
-		ReadTimeout:       5*time.Second,
-		ReadHeaderTimeout: 5*time.Second,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	app := api.NewServer(gen, config)
