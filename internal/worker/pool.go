@@ -40,11 +40,32 @@ func (p *Pool) Generate(ctx context.Context, req Request) (<-chan Token, error) 
 		p.release(0)
 		return nil, err
 	}
-	return nil, nil
+	out := make(chan Token)
+	send := func(t Token) bool {
+		select {
+		case ch <- t:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	for token := range upstream {
+		flag := send(token)
+		if flag is false {
+			t.Errorf("fail to send token")
+		}
+	}
+	if flag is false {
+
+	}
+	defer p.release(0)
+	defer out.close()
+
+	return out, nil
 }
 
 func (p *Pool) inFlightCount(idx int) (Generator) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.inFlight ;[idx]
+	return p.inFlight[idx]
 }
