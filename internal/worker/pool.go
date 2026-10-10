@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
-	"hash/fnv"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
 	"sync"
 )
 
@@ -93,11 +95,15 @@ func (p *Pool) inFlightCount(i int) int {
 
 // score is the rendezvous-hashing weight of worker i for key. For each key,
 // the worker with the highest score is its preferred worker.
+//
+// SHA-256 rather than a fast hash like FNV: FNV mixes its input too weakly for
+// comparing scores (it sent ~80% of short keys to one worker), and hash/maphash
+// is randomly seeded per process, so keys would move to new workers on every
+// restart. The ~0.6 µs per score is negligible next to an inference request.
+// The "%d:" separator keeps worker 1 + "2x" distinct from worker 12 + "x".
 func score(key string, i int) uint64 {
-	h := fnv.New64a()
-	h.Write([]byte{byte(i)}) // worker first: the key's bytes then mix the difference through the whole hash
-	h.Write([]byte(key))
-	return h.Sum64()
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", i, key)))
+	return binary.BigEndian.Uint64(sum[:8])
 }
 
 func (p *Pool) pickFor(key string) int {
