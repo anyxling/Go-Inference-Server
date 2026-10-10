@@ -134,3 +134,48 @@ func TestPoolEvenSplit(t *testing.T) {
 	}
 	cancel()
 }
+
+func TestPoolFreedWorkerGetNextReq(t *testing.T) {
+	long := make([]string, 100)
+	for i := range long {
+		long[i] = "x"
+	}
+	p := NewPool(
+		&Fake{Tokens: long, Delay: 50 * time.Millisecond},
+		&Fake{Tokens: long, Delay: 50 * time.Millisecond},
+	)
+	// First request: both idle, rotation starts at 0, so it goes to worker 0.
+	ctx0, cancel0 := context.WithCancel(context.Background())
+	defer cancel0()
+	_, err := p.Generate(ctx0, Request{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	// Second request: worker 1 is less busy, so it goes there.
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	ch1, err := p.Generate(ctx1, Request{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if p.inFlightCount(0) != 1 || p.inFlightCount(1) != 1 {
+		t.Fatalf("after two requests: counts = %d, %d; want 1, 1", p.inFlightCount(0), p.inFlightCount(1))
+	}
+	// Free worker 1.
+	cancel1()
+	for range ch1 {
+	}
+
+	// A new request
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	ch2, err := p.Generate(ctx2, Request{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if p.inFlightCount(1) != 1 {
+		t.Fatalf("worker 1 count = %d, want 1: the freed worker should get the next request", p.inFlightCount(1))
+	}
+	if p.inFlightCount(0) != 1 {
+		t.Fatalf("worker 1 count = %d, want 1: the freed worker should get the next request", p.inFlightCount(0))
+	}
+}
