@@ -116,7 +116,7 @@ func newGenerator(kind, url, model string) worker.Generator {
 	case kind == "vllm":
 		return worker.NewVLLMClient(url, model, 2*time.Second)
 	default:
-		return worker.NewHTTPClient(urL, 2*time.Second)
+		return worker.NewHTTPClient(url, 2*time.Second)
 	}
 }
 
