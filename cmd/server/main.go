@@ -54,6 +54,7 @@ func main() {
 		gen = worker.NewHTTPClient(*workerURL, 2*time.Second)
 		log.Printf("using http")
 	}
+	gen = worker.NewPool(gen)
 
 	baseCtx, cancelAll := context.WithCancel(context.Background())
 	defer cancelAll()
