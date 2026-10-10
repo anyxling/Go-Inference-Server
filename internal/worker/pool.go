@@ -1,8 +1,8 @@
 package worker
 
 import (
-	"sync"
 	"context"
+	"sync"
 )
 
 type Pool struct {
@@ -43,29 +43,24 @@ func (p *Pool) Generate(ctx context.Context, req Request) (<-chan Token, error) 
 	out := make(chan Token)
 	send := func(t Token) bool {
 		select {
-		case ch <- t:
+		case out <- t:
 			return true
 		case <-ctx.Done():
 			return false
 		}
 	}
-	for token := range upstream {
-		flag := send(token)
-		if flag is false {
-			t.Errorf("fail to send token")
+	go func() {
+		defer close(out)
+		defer p.release(0)
+		for token := range upstream {
+			send(token)
 		}
-	}
-	if flag is false {
-
-	}
-	defer p.release(0)
-	defer out.close()
-
+	}()
 	return out, nil
 }
 
-func (p *Pool) inFlightCount(idx int) (Generator) {
+func (p *Pool) inFlightCount(i int) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.inFlight[idx]
+	return p.inFlight[i]
 }
