@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 	"time"
+	"sync"
 )
 
 func TestPoolReleasesAfterNormalStream(t *testing.T) {
@@ -168,7 +169,8 @@ func TestPoolFreedWorkerGetNextReq(t *testing.T) {
 
 	// A new request
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	ch2, err := p.Generate(ctx2, Request{})
+	defer cancel2()
+	_, err := p.Generate(ctx2, Request{})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -177,5 +179,34 @@ func TestPoolFreedWorkerGetNextReq(t *testing.T) {
 	}
 	if p.inFlightCount(0) != 1 {
 		t.Fatalf("worker 1 count = %d, want 1: the freed worker should get the next request", p.inFlightCount(0))
+	}
+}
+
+// When every worker is idle, all counts tie at 0. Least-in-flight alone would
+// send every request to worker 0; the round-robin tie-break should rotate them.
+func TestPoolTiesRotate(t *testing.T) {
+	// Each worker answers with its own name, so the first token says who served the request.
+	p := NewPool(
+		&Fake{Tokens: []string{"w0"}},
+		&Fake{Tokens: []string{"w1"}},
+	)
+
+	want := []string{"w0", "w1", "w0", "w1", "w0", "w1"}
+	for n, w := range want {
+		ch, err := p.Generate(context.Background(), Request{})
+		if err != nil {
+			t.Fatalf("request %d: Generate: %v", n, err)
+		}
+		first := <-ch
+		// Drain to the end so the worker is released before the next request:
+		// that is what makes every request see a tie.
+		for range ch {
+		}
+		if first.Text != w {
+			t.Fatalf("request %d served by %q, want %q", n, first.Text, w)
+		}
+		if a, b := p.inFlightCount(0), p.inFlightCount(1); a != 0 || b != 0 {
+			t.Fatalf("after request %d: counts = %d, %d; want 0, 0", n, a, b)
+		}
 	}
 }
