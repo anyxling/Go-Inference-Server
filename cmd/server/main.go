@@ -31,6 +31,7 @@ func main() {
 	workerURL := flag.String("worker-url", "", "empty uses the built-in fake worker")
 	workerKind := flag.String("worker-kind", "http", "http (worker/server.py protocol) or vllm (OpenAI-compatible)")
 	workerModel := flag.String("worker-model", "Qwen/Qwen2.5-0.5B-Instruct", "model name sent to a vllm worker")
+	router := flag.String("router", "least", "least or affinity")
 
 	flag.Parse()
 
@@ -43,7 +44,6 @@ func main() {
 	}
 
 	urls := parseWorkerURLs(*workerURL)
-
 	var gen worker.Generator
 	switch {
 	case *workerURL == "":
@@ -53,10 +53,17 @@ func main() {
 		log.Fatalf("-worker-url %q contains no URLs", *workerURL)
 	default:
 		var gens []worker.Generator
+
 		for _, u := range urls {
 			gens = append(gens, newGenerator(*workerKind, u, *workerModel))
 		}
-		gen = worker.NewPool(gens...)
+		pool := worker.NewPool(gens...)
+		if *router == "affinity" {
+			pool.Affinity = true
+		} else {
+			pool.Affinity = false
+		}
+		gen = pool
 		log.Printf("pool of %d %s workers: %v", len(urls), *workerKind, urls)
 	}
 
