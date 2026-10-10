@@ -3,9 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
-	"sync"
 )
 
 func TestPoolReleasesAfterNormalStream(t *testing.T) {
@@ -170,7 +170,7 @@ func TestPoolFreedWorkerGetNextReq(t *testing.T) {
 	// A new request
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	_, err := p.Generate(ctx2, Request{})
+	_, err = p.Generate(ctx2, Request{})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestPoolFreedWorkerGetNextReq(t *testing.T) {
 		t.Fatalf("worker 1 count = %d, want 1: the freed worker should get the next request", p.inFlightCount(1))
 	}
 	if p.inFlightCount(0) != 1 {
-		t.Fatalf("worker 1 count = %d, want 1: the freed worker should get the next request", p.inFlightCount(0))
+		t.Fatalf("worker 0 count = %d, want 1: the freed worker should get the next request", p.inFlightCount(0))
 	}
 }
 

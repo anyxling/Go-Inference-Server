@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,20 +42,23 @@ func main() {
 		log.Fatalf("invalid config: %v", err)
 	}
 
-	var gen worker.Generator
+	urls := parseWorkerURLs(*workerURL)
 
+	var gen worker.Generator
 	switch {
 	case *workerURL == "":
-		gen = &worker.Fake{Tokens: []string{"a", "b", "c"}, Delay: 100 * time.Millisecond}
-		log.Printf("empty worker url hence use default fake worker")
-	case *workerKind == "vllm":
-		gen = worker.NewVLLMClient(*workerURL, *workerModel, 2*time.Second)
-		log.Printf("using vllm")
+		gen = worker.NewPool(&worker.Fake{Tokens: []string{"a", "b", "c"}, Delay: 100 * time.Millisecond})
+		log.Printf("no worker url; using the fake worker")
+	case len(urls) == 0:
+		log.Fatalf("-worker-url %q contains no URLs", *workerURL)
 	default:
-		gen = worker.NewHTTPClient(*workerURL, 2*time.Second)
-		log.Printf("using http")
+		var gens []worker.Generator
+		for _, u := range urls {
+			gens = append(gens, newGenerator(*workerKind, u, *workerModel))
+		}
+		gen = worker.NewPool(gens...)
+		log.Printf("pool of %d %s workers: %v", len(urls), *workerKind, urls)
 	}
-	gen = worker.NewPool(gen)
 
 	baseCtx, cancelAll := context.WithCancel(context.Background())
 	defer cancelAll()
@@ -105,4 +109,25 @@ func main() {
 		log.Printf("server exited with error %v", err)
 		return
 	}
+}
+
+func newGenerator(kind, url, model string) worker.Generator {
+	switch {
+	case kind == "vllm":
+		return worker.NewVLLMClient(url, model, 2*time.Second)
+	default:
+		return worker.NewHTTPClient(urL, 2*time.Second)
+	}
+}
+
+func parseWorkerURLs(s string) []string {
+	var res []string
+	urls := strings.Split(s, ",")
+	for i := range urls {
+		url := strings.TrimSpace(urls[i])
+		if url != "" {
+			res = append(res, url)
+		}
+	}
+	return res
 }
