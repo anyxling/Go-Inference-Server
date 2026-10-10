@@ -98,3 +98,39 @@ func TestPoolClientCancel(t *testing.T) {
 		t.Fatalf("should be 0, got %d", n)
 	}
 }
+
+func TestPoolEvenSplit(t *testing.T) {
+	long := make([]string, 100)
+	for i := range long {
+		long[i] = "x"
+	}
+	p := NewPool(
+		&Fake{Tokens: long, Delay: 50 * time.Millisecond},
+		&Fake{Tokens: long, Delay: 50 * time.Millisecond},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const n = 10
+	chans := make([]<-chan Token, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ch, err := p.Generate(ctx, Request{})
+			if err != nil {
+				t.Errorf("Generate: %v", err)
+				return
+			}
+			chans[i] = ch
+		}(i)
+	}
+	wg.Wait()
+	if p.inFlightCount(0) != 5 {
+		t.Fatalf("request counts for 1st worker should be 5, got %v", p.inFlight[0])
+	}
+	if p.inFlightCount(1) != 5 {
+		t.Fatalf("request counts for 2nd worker should be 5, got %v", p.inFlight[1])
+	}
+	cancel()
+}
