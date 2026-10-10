@@ -1,9 +1,9 @@
 package worker
 
 import (
-	"testing"
 	"context"
 	"errors"
+	"testing"
 )
 
 func TestPoolReleasesAfterNormalStream(t *testing.T) {
@@ -34,6 +34,35 @@ func TestPoolGenerateFail(t *testing.T) {
 	}
 	if ch != nil {
 		t.Fatalf("Generate returned a channel on error, want %v", wantErr)
+	}
+	n := p.inFlightCount(0)
+	if n != 0 {
+		t.Fatalf("should be 0, got %d", n)
+	}
+}
+
+func TestPoolCountDuringStream(t *testing.T) {
+	p := NewPool(&Fake{Tokens: []string{"a", "b", "c"}, Delay: 50 * time.Millisecond})
+	ch, err := p.Generate(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	first, ok := <-ch
+	if !ok {
+		t.Fatalf("channel closed before first token")
+	}
+	if first.Text != "a" {
+		t.Fatalf("first token should be %v, got %v", "a", first)
+	}
+	if p.inFlightCount(0) != 1 {
+		t.Fatalf("should be 1, got %d", p.inFlightCount(0))
+	}
+	var got []Token
+	for tok := range ch {
+		got = append(got, tok)
+	}
+	if len(got) != 3 {
+		t.Fatalf("should get 3 tokens, but got %d tokens", len(got))
 	}
 	n := p.inFlightCount(0)
 	if n != 0 {
