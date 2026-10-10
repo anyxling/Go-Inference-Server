@@ -9,6 +9,7 @@ type Pool struct {
 	mu       sync.Mutex // mutex guards inFlight
 	workers  []Generator
 	inFlight []int
+	next     int
 }
 
 var _ Generator = (*Pool)(nil)
@@ -21,10 +22,19 @@ func NewPool(workers ...Generator) *Pool {
 	return &Pool{workers: workers, inFlight: inFlight}
 }
 
-func (p *Pool) acquire(i int) {
+func (p *Pool) pick() int {
 	p.mu.Lock()
-	p.inFlight[i]++
+	best := -1
+	for k := 0; k < len(p.inFlight); k++ {
+		i := (p.next + k) % len(p.inFlight)
+		if best == -1 || p.inFlight[i] < p.inFlight[best] {
+			best = i
+		}
+	}
+	p.inFlight[best]++
+	p.next = (best + 1) % len(p.inFlight)
 	p.mu.Unlock()
+	return best
 }
 
 func (p *Pool) release(i int) {
@@ -34,10 +44,10 @@ func (p *Pool) release(i int) {
 }
 
 func (p *Pool) Generate(ctx context.Context, req Request) (<-chan Token, error) {
-	p.acquire(0)
-	upstream, err := p.workers[0].Generate(ctx, req)
+	i := p.pick()
+	upstream, err := p.workers[i].Generate(ctx, req)
 	if err != nil {
-		p.release(0)
+		p.release(i)
 		return nil, err
 	}
 	out := make(chan Token)
@@ -51,7 +61,7 @@ func (p *Pool) Generate(ctx context.Context, req Request) (<-chan Token, error) 
 	}
 	go func() {
 		defer close(out)
-		defer p.release(0)
+		defer p.release(i)
 		for token := range upstream {
 			send(token)
 		}
