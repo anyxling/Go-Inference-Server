@@ -445,6 +445,7 @@ Version 3 would place several vLLM instances behind the Go service. Nginx's `ups
 
 - Measure affinity before relying on it. Benchmark `-router least` against `-router affinity` on a workload whose prompts repeat a small set of schemas, and compare time to first token and vLLM's prefix-cache hit rate. Until the numbers show a gain, affinity routing is not known to help.
 - Identify workers by URL rather than by index. The affinity score hashes the worker's position in the `-worker-url` list, so removing or reordering a worker moves keys between the workers that remain. Hashing the URL instead means only the removed worker's keys move.
+- Raise the affinity key from 512 to 1024 bytes. At about 4 bytes per English token, 512 bytes covers roughly 128 tokens and 1024 bytes roughly 256. Bytes are kept rather than tokens because counting tokens would need the model's tokenizer in the gateway. The right length depends on the prompt structure: the key should cover the shared part of the prompt, such as a schema, and stop before the part that varies, such as the question. The benchmark above should confirm the new value.
 
 ## 14. Future work: admission and per-caller limits
 
