@@ -441,6 +441,11 @@ The access log format includes `$upstream_http_x_request_id`, the `X-Request-ID`
 
 Version 3 would place several vLLM instances behind the Go service. Nginx's `upstream` balancing is the wrong tool for that layer: it picks by connection count and cannot see batch occupancy or KV-cache locality. The Go service already implements `Generator` and owns admission control, so a `Pool` implementation that holds several `VLLMClient`s and picks by in-flight count, then by weighted capacity, health, prefix affinity (route repeated system prompts or conversations to the worker that already holds their KV cache), and finally vLLM's `/metrics` occupancy, is the natural path. Nginx or an Ingress stays at the edge for TLS and per-client limits, and the model-aware routing happens in the service.
 
+### Open items
+
+- Measure affinity before relying on it. Benchmark `-router least` against `-router affinity` on a workload whose prompts repeat a small set of schemas, and compare time to first token and vLLM's prefix-cache hit rate. Until the numbers show a gain, affinity routing is not known to help.
+- Identify workers by URL rather than by index. The affinity score hashes the worker's position in the `-worker-url` list, so removing or reordering a worker moves keys between the workers that remain. Hashing the URL instead means only the removed worker's keys move.
+
 ## 14. Future work: admission and per-caller limits
 
 ### Bounded wait for a slot
