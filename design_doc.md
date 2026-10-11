@@ -440,3 +440,33 @@ The access log format includes `$upstream_http_x_request_id`, the `X-Request-ID`
 ## 13. Future work: multiple workers
 
 Version 3 would place several vLLM instances behind the Go service. Nginx's `upstream` balancing is the wrong tool for that layer: it picks by connection count and cannot see batch occupancy or KV-cache locality. The Go service already implements `Generator` and owns admission control, so a `Pool` implementation that holds several `VLLMClient`s and picks by in-flight count, then by weighted capacity, health, prefix affinity (route repeated system prompts or conversations to the worker that already holds their KV cache), and finally vLLM's `/metrics` occupancy, is the natural path. Nginx or an Ingress stays at the edge for TLS and per-client limits, and the model-aware routing happens in the service.
+
+## 14. Future work: admission and per-caller limits
+
+### Bounded wait for a slot
+
+Version 1 rejects a request the moment it finds every slot taken (section 7). A burst slightly above capacity is therefore rejected even though generations last only one to two seconds (section 11), so at full load slots free up continuously. The next step replaces the immediate rejection with a short, bounded wait:
+
+- A request that finds no free slot waits up to N ms for one, with N set by a new flag.
+- It stops waiting as soon as its context ends: the client disconnects or the service shuts down. A request that gives up this way receives no response, as with any client disconnect (section 6).
+- The number of waiting requests is capped by a second flag. When the queue is full, or the wait runs out, the request receives the same `503 capacity_exceeded` with `Retry-After: 1` as today, so clients see no new behaviour.
+- Waiting requests do not reach `Generate`; only admitted requests open a connection to a worker.
+
+Time spent waiting adds to the time to first token that the client sees, so N should stay well below the first-token timeout; a few hundred milliseconds absorbs short bursts without hiding sustained overload. The queue wait and the number of rejections should be measured, so that N and the queue cap are set from data rather than chosen in advance.
+
+### Rate limits keyed on the user token
+
+The per-client limit in section 12 is keyed on the client IP, which identifies callers poorly. Many users behind one NAT address share a single budget, a client with many addresses escapes the limit, and inside a Kubernetes cluster pod addresses change on every restart and do not map to callers at all. The next step keys the limit on the authenticated user carried in the request's bearer token.
+
+- Callers send `Authorization: Bearer <token>`. The token is validated before its user is used as a key; keying on an unvalidated value would let a caller create a fresh budget with every request. Behind a gateway that already validates tokens, the service reads the user from the validated token; standalone, the service validates the token itself. Requests without a valid token receive `401 unauthorized`. This adds authentication to the API, which version 1 does not have.
+- The limit moves from Nginx into the Go service, as middleware ahead of the inference handler, because Nginx cannot validate tokens. Nginx keeps a generous per-IP limit as flood protection, including against floods of invalid tokens.
+- Each user gets a request-rate limit and a limit on concurrent streams. The concurrent limit matters more for this workload: requests last one to two seconds, so a user at 20 requests per second holds about 30 streams at once, enough to take half of the recommended `-max-active` of 64 (section 11) from everyone else.
+- A user over either limit receives `429 too_many_requests` with `Retry-After`, the same body the edge returns today.
+- The order of checks is validation, then the per-user limit, then the global slot. A user's excess requests are rejected before they can occupy or wait for a global slot.
+- Counters held in memory are per service instance, so with N instances each user effectively gets N times the limit. Running several instances requires either a shared store for the counters or dividing each limit by N.
+
+### Open items
+
+- Choose N and the queue cap from a burst benchmark: concurrency above `-max-active` for a few seconds, then back below it.
+- Decide whether waiting requests are served strictly in arrival order, and whether separate queues are needed for interactive and batch callers.
+- Decide how tokens are validated when the service runs without a gateway in front of it.
